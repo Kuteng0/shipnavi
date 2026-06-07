@@ -24,6 +24,7 @@ const keys = {
 };
 
 const supportedCarriers = ['ヤマト', '佐川', '日本郵便'];
+const shippingSizes = [60, 80, 100, 120, 140, 160];
 
 const emptyData = {
   products: [],
@@ -60,7 +61,7 @@ function normalize(value) {
 
 function normalizeSize(value) {
   const match = normalize(value).match(/\d+/);
-  return match ? match[0] : '60';
+  return match ? match[0] : '';
 }
 
 function normalizeCarrier(value) {
@@ -229,9 +230,27 @@ function getDataHealth() {
   };
 }
 
-function getOrderSize(order, productsBySku = getProductsBySku()) {
-  const product = productsBySku[order.sku];
-  return product ? normalizeSize(product.size) : '60';
+function getZoneByPostal(postal) {
+  return 'default';
+}
+
+function sizeFromTotal(value) {
+  const numeric = Math.max(0, toNumber(value));
+  return shippingSizes.find((size) => numeric <= size) || null;
+}
+
+function getProductSize(product) {
+  const savedSize = sizeFromTotal(product?.size);
+  if (savedSize) return savedSize;
+  const totalLength = toNumber(product?.length) + toNumber(product?.width) + toNumber(product?.height);
+  return sizeFromTotal(totalLength);
+}
+
+function estimateBundledSize(totalVolume, largestItemSize) {
+  const cubeSide = Math.ceil(Math.cbrt(Math.max(0, totalVolume)));
+  const volumeSize = sizeFromTotal(cubeSide * 3);
+  if (!volumeSize && !largestItemSize) return null;
+  return Math.max(volumeSize || 0, largestItemSize || 0);
 }
 
 function isOrderBundleable(order, productsBySku = getProductsBySku()) {
@@ -259,59 +278,96 @@ function getBundleCandidates() {
     .map((orders) => ({ key: getBundleKey(orders[0]), orders }));
 }
 
+function getShipmentOrderGroups() {
+  const orders = getData('orders');
+  const productsBySku = getProductsBySku();
+  const bundleKeys = new Set(getBundleCandidates().map((group) => group.key));
+  const grouped = orders.reduce((acc, order) => {
+    const key = getBundleKey(order);
+    const shipmentKey = bundleKeys.has(key) && isOrderBundleable(order, productsBySku) ? key : order.id;
+    acc[shipmentKey] = acc[shipmentKey] || [];
+    acc[shipmentKey].push(order);
+    return acc;
+  }, {});
+  return Object.values(grouped);
+}
+
 function getFareOptions(size, zone = 'default') {
-  if (!getData('products').length || !getFareRows().length) return null;
-  const requestedSize = toNumber(size);
+  if (!getFareRows().length || !size) return [];
   return getFareRows()
     .map(normalizeFare)
     .filter((fare) => supportedCarriers.includes(fare.carrier) && toNumber(fare.fare) > 0)
-    .filter((fare) => !zone || fare.zone === zone || fare.zone === 'default')
-    .filter((fare) => toNumber(fare.size) >= requestedSize)
+    .filter((fare) => fare.zone === zone || fare.zone === 'default')
+    .filter((fare) => toNumber(fare.size) === toNumber(size))
     .sort((a, b) => toNumber(a.fare) - toNumber(b.fare));
 }
 
-function findBestFare(size, zone = 'default') {
-  const fareRows = getFareOptions(size, zone);
-  return fareRows?.[0] || null;
+function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
+  const itemMap = {};
+  let totalWeight = 0;
+  let totalVolume = 0;
+  let largestItemSize = 0;
+  let missingProduct = false;
+
+  orders.forEach((order) => {
+    const quantity = Math.max(1, toNumber(order.quantity) || 1);
+    const product = productsBySku[order.sku];
+    itemMap[order.sku] = (itemMap[order.sku] || 0) + quantity;
+    if (!product) {
+      missingProduct = true;
+      return;
+    }
+    totalWeight += toNumber(product.weight) * quantity;
+    totalVolume += toNumber(product.length) * toNumber(product.width) * toNumber(product.height) * quantity;
+    largestItemSize = Math.max(largestItemSize, getProductSize(product) || 0);
+  });
+
+  const isBundled = orders.length > 1;
+  const estimatedSize = missingProduct ? null : (isBundled ? estimateBundledSize(totalVolume, largestItemSize) : largestItemSize);
+  const zone = getZoneByPostal(orders[0]?.postal);
+  const fareOptions = missingProduct ? [] : getFareOptions(estimatedSize, zone);
+  const best = fareOptions[0] || null;
+  const second = fareOptions[1] || null;
+  const status = missingProduct ? '商品未登録' : (best ? '' : '対応運賃なし');
+
+  return {
+    shipmentGroupId: `SG-${String(index + 1).padStart(3, '0')}`,
+    orderNos: orders.map((order) => order.orderNo).join(', '),
+    customer: orders[0]?.customer || '',
+    postal: orders[0]?.postal || '',
+    address: orders[0]?.address || '',
+    items: Object.entries(itemMap).map(([sku, quantity]) => `${sku} x ${quantity}`).join(', '),
+    estimatedSize: estimatedSize || '',
+    totalWeight,
+    recommendedCarrier: best?.carrier || '',
+    recommendedService: best?.service || '',
+    estimatedFare: best ? toNumber(best.fare) : '',
+    secondCarrier: second ? `${second.carrier} ${second.service}` : '',
+    secondFare: second ? toNumber(second.fare) : '',
+    savings: best && second ? Math.max(0, toNumber(second.fare) - toNumber(best.fare)) : 0,
+    status,
+  };
+}
+
+function getShipmentGroups() {
+  const health = getDataHealth();
+  if (!health.hasOrders) return [];
+  return getShipmentOrderGroups().map((orders, index) => buildShipmentGroup(orders, index));
 }
 
 function getRecommendationRows() {
-  const health = getDataHealth();
-  if (!health.hasOrders || health.errors.length) return [];
-  const productsBySku = getProductsBySku();
-  const orders = getData('orders');
-  const bundleKeys = new Set(getBundleCandidates().flatMap((group) => group.orders.map((order) => order.id)));
-
-  return orders.map((order) => {
-    const size = getOrderSize(order, productsBySku);
-    const fareOptions = getFareOptions(size) || [];
-    const best = fareOptions[0] || null;
-    const nextBestFare = fareOptions[1] ? toNumber(fareOptions[1].fare) : toNumber(best?.fare);
-    const estimatedFare = best ? toNumber(best.fare) : 0;
-    return {
-      orderNo: order.orderNo,
-      customer: order.customer,
-      postal: order.postal,
-      address: order.address,
-      sku: order.sku,
-      quantity: order.quantity,
-      bundleable: bundleKeys.has(order.id) ? '同梱候補' : '単独',
-      recommendedCarrier: best?.carrier || '',
-      recommendedService: best?.service || '',
-      estimatedFare,
-      saving: Math.max(0, nextBestFare - estimatedFare),
-    };
-  });
+  return getShipmentGroups();
 }
 
 function getResultSummary() {
   const health = getDataHealth();
-  const recommendations = getRecommendationRows();
+  const shipments = getShipmentGroups();
+  const topRecommendation = shipments.find((shipment) => shipment.recommendedCarrier) || null;
   return {
     orderCount: getData('orders').length,
     bundleCount: getBundleCandidates().length,
-    saving: recommendations.reduce((sum, row) => sum + row.saving, 0),
-    topRecommendation: recommendations[0] || null,
+    saving: shipments.reduce((sum, shipment) => sum + toNumber(shipment.savings), 0),
+    topRecommendation,
     errors: health.errors,
   };
 }
@@ -513,8 +569,7 @@ function renderResults() {
   const target = document.querySelector('#results-view');
   if (!target) return;
   const summary = getResultSummary();
-  const recommendations = getRecommendationRows();
-  const bundles = getBundleCandidates();
+  const shipments = getShipmentGroups();
   const health = getDataHealth();
   const alertPanel = summary.errors.length ? `
     <section class="panel full-width">
@@ -522,12 +577,26 @@ function renderResults() {
       ${summary.errors.map((error) => `<p>${escapeHtml(error)}</p>`).join('')}
     </section>
   ` : '';
-  const comparisonRows = recommendations.length
-    ? recommendations.map((row) => `<tr><td>${escapeHtml(row.orderNo)}</td><td>${escapeHtml(row.bundleable)}</td><td>${escapeHtml(row.recommendedCarrier)}</td><td>${escapeHtml(row.recommendedService)}</td><td>${formatYen(row.estimatedFare)}</td><td><span class="badge green">${formatYen(row.saving)}</span></td></tr>`).join('')
-    : `<tr><td colspan="6">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
-  const bundleRows = bundles.length
-    ? bundles.map((group) => `<tr><td>${escapeHtml(group.orders[0].customer)} / ${escapeHtml(group.orders[0].postal)} / ${escapeHtml(group.orders[0].address)}</td><td>${group.orders.map((order) => escapeHtml(order.orderNo)).join('<br>')}</td><td>${group.orders.length}</td></tr>`).join('')
-    : '<tr><td colspan="3">同梱対象の注文がありません。</td></tr>';
+  const shipmentRows = shipments.length
+    ? shipments.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.shipmentGroupId)}</td>
+        <td>${escapeHtml(row.orderNos)}</td>
+        <td>${escapeHtml(row.customer)}</td>
+        <td>${escapeHtml(row.postal)}</td>
+        <td>${escapeHtml(row.address)}</td>
+        <td>${escapeHtml(row.items)}</td>
+        <td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td>
+        <td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td>
+        <td>${escapeHtml(row.recommendedCarrier || row.status)}</td>
+        <td>${escapeHtml(row.recommendedService)}</td>
+        <td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td>
+        <td>${escapeHtml(row.secondCarrier || '-')}</td>
+        <td>${row.secondFare === '' ? '-' : formatYen(row.secondFare)}</td>
+        <td><span class="badge green">${formatYen(row.savings)}</span></td>
+      </tr>
+    `).join('')
+    : `<tr><td colspan="14">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
   target.outerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>注文数</p><strong>${summary.orderCount}</strong></article>
@@ -538,22 +607,30 @@ function renderResults() {
     ${alertPanel}
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV导出</button></div>
-      <div class="responsive-table"><table><thead><tr><th>注文番号</th><th>同梱</th><th>推薦会社</th><th>推薦サービス</th><th>預估運費</th><th>節省金額</th></tr></thead>
-      <tbody>${comparisonRows}</tbody></table></div>
+      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>節約金額</th></tr></thead>
+      <tbody>${shipmentRows}</tbody></table></div>
     </section>
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>同梱結果</h2></div>
-      <div class="responsive-table"><table><thead><tr><th>配送先</th><th>対象注文</th><th>件数</th></tr></thead><tbody>${bundleRows}</tbody></table></div>
+      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.postal)}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="10">注文データがありません。</td></tr>'}</tbody></table></div>
     </section>
   `;
   document.querySelector('#export-results-csv')?.addEventListener('click', () => {
-    const rows = recommendations.map((row) => ({
-      orderNo: row.orderNo,
-      bundle: row.bundleable,
+    const rows = shipments.map((row) => ({
+      shipmentGroupId: row.shipmentGroupId,
+      orderNos: row.orderNos,
+      customer: row.customer,
+      postal: row.postal,
+      address: row.address,
+      items: row.items,
+      estimatedSize: row.estimatedSize,
+      totalWeight: row.totalWeight,
       recommendedCarrier: row.recommendedCarrier,
       recommendedService: row.recommendedService,
       estimatedFare: row.estimatedFare,
-      saving: row.saving,
+      secondCarrier: row.secondCarrier,
+      secondFare: row.secondFare,
+      savings: row.savings,
     }));
     downloadCsv('shipnavi-results.csv', rows);
     showToast('結果中心CSVを出力しました。');
