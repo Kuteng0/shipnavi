@@ -25,28 +25,10 @@ const keys = {
 
 const supportedCarriers = ['ヤマト', '佐川', '日本郵便'];
 
-const seedData = {
-  products: [
-    { id: 'p-demo-1', sku: 'SKU-60-A', name: 'サンプル小物', size: '60', weight: '450', length: '20', width: '15', height: '10', bundleable: true },
-    { id: 'p-demo-2', sku: 'SKU-80-B', name: 'サンプルバッグ', size: '80', weight: '900', length: '34', width: '24', height: '14', bundleable: true },
-    { id: 'p-demo-3', sku: 'SKU-100-C', name: '割れ物セット', size: '100', weight: '1600', length: '45', width: '30', height: '20', bundleable: false },
-  ],
-  carriers: [
-    { id: 'rate-1', carrier: 'ヤマト', service: '宅急便', size: '60', zone: 'default', fare: '930' },
-    { id: 'rate-2', carrier: 'ヤマト', service: '宅急便', size: '80', zone: 'default', fare: '1150' },
-    { id: 'rate-3', carrier: 'ヤマト', service: '宅急便', size: '100', zone: 'default', fare: '1390' },
-    { id: 'rate-4', carrier: '佐川', service: '飛脚宅配便', size: '60', zone: 'default', fare: '880' },
-    { id: 'rate-5', carrier: '佐川', service: '飛脚宅配便', size: '80', zone: 'default', fare: '1080' },
-    { id: 'rate-6', carrier: '佐川', service: '飛脚宅配便', size: '100', zone: 'default', fare: '1320' },
-    { id: 'rate-7', carrier: '日本郵便', service: 'ゆうパック', size: '60', zone: 'default', fare: '910' },
-    { id: 'rate-8', carrier: '日本郵便', service: 'ゆうパック', size: '80', zone: 'default', fare: '1120' },
-    { id: 'rate-9', carrier: '日本郵便', service: 'ゆうパック', size: '100', zone: 'default', fare: '1360' },
-  ],
-  orders: [
-    { id: 'o-demo-1', orderNo: 'ORD-001', customer: '田中商店', postal: '100-0001', address: '東京都千代田区1-1', sku: 'SKU-60-A', quantity: '1' },
-    { id: 'o-demo-2', orderNo: 'ORD-002', customer: '田中商店', postal: '100-0001', address: '東京都千代田区1-1', sku: 'SKU-80-B', quantity: '1' },
-    { id: 'o-demo-3', orderNo: 'ORD-003', customer: '青空株式会社', postal: '530-0001', address: '大阪府大阪市1-2', sku: 'SKU-100-C', quantity: '1' },
-  ],
+const emptyData = {
+  products: [],
+  carriers: [],
+  orders: [],
   fareTables: [],
   templates: [],
   templateMappings: [],
@@ -56,13 +38,12 @@ const seedData = {
 
 function seedDashboardData() {
   Object.entries(keys).forEach(([name, key]) => {
-    if (!localStorage.getItem(key)) storage.write(key, seedData[name]);
+    if (!localStorage.getItem(key)) storage.write(key, emptyData[name]);
   });
-  if (!getData('fareTables').length) setData('fareTables', getData('carriers'));
 }
 
 function getData(name) {
-  return storage.read(keys[name], seedData[name] || []);
+  return storage.read(keys[name], emptyData[name] || []);
 }
 
 function setData(name, value) {
@@ -230,7 +211,22 @@ function getProductsBySku() {
 }
 
 function getFareRows() {
-  return getData('fareTables').length ? getData('fareTables') : getData('carriers');
+  return getData('fareTables');
+}
+
+function getDataHealth() {
+  const orders = getData('orders');
+  const products = getData('products');
+  const fares = getFareRows();
+  return {
+    hasOrders: orders.length > 0,
+    hasProducts: products.length > 0,
+    hasFares: fares.length > 0,
+    errors: [
+      products.length ? '' : '商品主档がありません。商品CSVを先に取り込んでください。',
+      fares.length ? '' : '運賃表がありません。運賃表CSVを先に取り込んでください。',
+    ].filter(Boolean),
+  };
 }
 
 function getOrderSize(order, productsBySku = getProductsBySku()) {
@@ -248,6 +244,7 @@ function getBundleKey(order) {
 }
 
 function getBundleCandidates() {
+  if (!getData('products').length) return [];
   const productsBySku = getProductsBySku();
   const grouped = getData('orders').reduce((acc, order) => {
     const key = getBundleKey(order);
@@ -262,26 +259,34 @@ function getBundleCandidates() {
     .map((orders) => ({ key: getBundleKey(orders[0]), orders }));
 }
 
-function findBestFare(size, zone = 'default') {
+function getFareOptions(size, zone = 'default') {
+  if (!getData('products').length || !getFareRows().length) return null;
   const requestedSize = toNumber(size);
-  const fareRows = getFareRows()
+  return getFareRows()
     .map(normalizeFare)
     .filter((fare) => supportedCarriers.includes(fare.carrier) && toNumber(fare.fare) > 0)
     .filter((fare) => !zone || fare.zone === zone || fare.zone === 'default')
     .filter((fare) => toNumber(fare.size) >= requestedSize)
     .sort((a, b) => toNumber(a.fare) - toNumber(b.fare));
-  return fareRows[0] || null;
+}
+
+function findBestFare(size, zone = 'default') {
+  const fareRows = getFareOptions(size, zone);
+  return fareRows?.[0] || null;
 }
 
 function getRecommendationRows() {
+  const health = getDataHealth();
+  if (!health.hasOrders || health.errors.length) return [];
   const productsBySku = getProductsBySku();
   const orders = getData('orders');
   const bundleKeys = new Set(getBundleCandidates().flatMap((group) => group.orders.map((order) => order.id)));
 
   return orders.map((order) => {
     const size = getOrderSize(order, productsBySku);
-    const best = findBestFare(size);
-    const currentFare = Math.max(...getFareRows().map((fare) => toNumber(fare.fare)).filter(Boolean), best ? toNumber(best.fare) : 0);
+    const fareOptions = getFareOptions(size) || [];
+    const best = fareOptions[0] || null;
+    const nextBestFare = fareOptions[1] ? toNumber(fareOptions[1].fare) : toNumber(best?.fare);
     const estimatedFare = best ? toNumber(best.fare) : 0;
     return {
       orderNo: order.orderNo,
@@ -294,18 +299,20 @@ function getRecommendationRows() {
       recommendedCarrier: best?.carrier || '',
       recommendedService: best?.service || '',
       estimatedFare,
-      saving: Math.max(0, currentFare - estimatedFare),
+      saving: Math.max(0, nextBestFare - estimatedFare),
     };
   });
 }
 
 function getResultSummary() {
+  const health = getDataHealth();
   const recommendations = getRecommendationRows();
   return {
     orderCount: getData('orders').length,
     bundleCount: getBundleCandidates().length,
     saving: recommendations.reduce((sum, row) => sum + row.saving, 0),
     topRecommendation: recommendations[0] || null,
+    errors: health.errors,
   };
 }
 
@@ -313,6 +320,7 @@ function renderDashboard() {
   const target = document.querySelector('#dashboard-view');
   if (!target) return;
   const summary = getResultSummary();
+  const notices = summary.errors.length ? `<section class="panel full-width"><h2>確認が必要です</h2>${summary.errors.map((error) => `<p>${escapeHtml(error)}</p>`).join('')}</section>` : '';
   target.outerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>注文数</p><strong>${summary.orderCount}</strong></article>
@@ -320,6 +328,7 @@ function renderDashboard() {
       <article class="stat-card"><p>推定節省額</p><strong>${formatYen(summary.saving)}</strong></article>
       <article class="stat-card"><p>最低運賃</p><strong>${formatYen(summary.topRecommendation?.estimatedFare || 0)}</strong></article>
     </section>
+    ${notices}
     <section class="panel full-width">
       <h2>Phase 2 MVP</h2>
       <p>注文CSV、商品主档、運賃表をLocalStorageに保存し、同梱候補と最低運賃を自動計算します。</p>
@@ -505,21 +514,36 @@ function renderResults() {
   if (!target) return;
   const summary = getResultSummary();
   const recommendations = getRecommendationRows();
+  const bundles = getBundleCandidates();
+  const health = getDataHealth();
+  const alertPanel = summary.errors.length ? `
+    <section class="panel full-width">
+      <h2>エラー</h2>
+      ${summary.errors.map((error) => `<p>${escapeHtml(error)}</p>`).join('')}
+    </section>
+  ` : '';
+  const comparisonRows = recommendations.length
+    ? recommendations.map((row) => `<tr><td>${escapeHtml(row.orderNo)}</td><td>${escapeHtml(row.bundleable)}</td><td>${escapeHtml(row.recommendedCarrier)}</td><td>${escapeHtml(row.recommendedService)}</td><td>${formatYen(row.estimatedFare)}</td><td><span class="badge green">${formatYen(row.saving)}</span></td></tr>`).join('')
+    : `<tr><td colspan="6">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
+  const bundleRows = bundles.length
+    ? bundles.map((group) => `<tr><td>${escapeHtml(group.orders[0].customer)} / ${escapeHtml(group.orders[0].postal)} / ${escapeHtml(group.orders[0].address)}</td><td>${group.orders.map((order) => escapeHtml(order.orderNo)).join('<br>')}</td><td>${group.orders.length}</td></tr>`).join('')
+    : '<tr><td colspan="3">同梱対象の注文がありません。</td></tr>';
   target.outerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>注文数</p><strong>${summary.orderCount}</strong></article>
       <article class="stat-card"><p>同梱数</p><strong>${summary.bundleCount}</strong></article>
-      <article class="stat-card"><p>推薦配送方式</p><strong>${escapeHtml(summary.topRecommendation?.recommendedCarrier || '-')}</strong></article>
+      <article class="stat-card"><p>推薦配送方式</p><strong>${escapeHtml(summary.topRecommendation ? `${summary.topRecommendation.recommendedCarrier} ${summary.topRecommendation.recommendedService}` : '-')}</strong></article>
       <article class="stat-card"><p>節省金額</p><strong>${formatYen(summary.saving)}</strong></article>
     </section>
+    ${alertPanel}
     <section class="table-card full-width">
-      <div class="table-toolbar"><h2>結果中心</h2><button class="button secondary" type="button" id="export-results-csv">CSV导出</button></div>
+      <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV导出</button></div>
       <div class="responsive-table"><table><thead><tr><th>注文番号</th><th>同梱</th><th>推薦会社</th><th>推薦サービス</th><th>預估運費</th><th>節省金額</th></tr></thead>
-      <tbody>${recommendations.map((row) => `<tr><td>${escapeHtml(row.orderNo)}</td><td>${escapeHtml(row.bundleable)}</td><td>${escapeHtml(row.recommendedCarrier)}</td><td>${escapeHtml(row.recommendedService)}</td><td>${formatYen(row.estimatedFare)}</td><td><span class="badge green">${formatYen(row.saving)}</span></td></tr>`).join('') || '<tr><td colspan="6">結果データがありません。</td></tr>'}</tbody></table></div>
+      <tbody>${comparisonRows}</tbody></table></div>
     </section>
     <section class="table-card full-width">
-      <div class="table-toolbar"><h2>同梱候補</h2></div>
-      <div class="responsive-table"><table><thead><tr><th>配送先</th><th>対象注文</th><th>件数</th></tr></thead><tbody>${getBundleCandidates().map((group) => `<tr><td>${escapeHtml(group.orders[0].customer)} / ${escapeHtml(group.orders[0].postal)} / ${escapeHtml(group.orders[0].address)}</td><td>${group.orders.map((order) => escapeHtml(order.orderNo)).join('<br>')}</td><td>${group.orders.length}</td></tr>`).join('') || '<tr><td colspan="3">同梱候補はありません。</td></tr>'}</tbody></table></div>
+      <div class="table-toolbar"><h2>同梱結果</h2></div>
+      <div class="responsive-table"><table><thead><tr><th>配送先</th><th>対象注文</th><th>件数</th></tr></thead><tbody>${bundleRows}</tbody></table></div>
     </section>
   `;
   document.querySelector('#export-results-csv')?.addEventListener('click', () => {
@@ -558,8 +582,7 @@ function renderSettings() {
     showToast('設定を保存しました。');
   });
   document.querySelector('#reset-dashboard-data')?.addEventListener('click', () => {
-    Object.entries(keys).forEach(([name, key]) => storage.write(key, seedData[name]));
-    setData('fareTables', seedData.carriers);
+    Object.entries(keys).forEach(([name, key]) => storage.write(key, emptyData[name]));
     showToast('LocalStorageをリセットしました。');
   });
 }
