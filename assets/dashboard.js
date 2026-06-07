@@ -28,10 +28,16 @@ const mockData = {
     { id: 'f-1', carrier: 'ヤマト運輸', fileName: 'mock-yamato-fares.csv', importedAt: '2026-06-07 09:00', rows: 48 },
   ],
   templates: [
-    { id: 't-1', name: 'ヤマト送り状CSV', columns: ['お客様管理番号', '送り先氏名', '郵便番号', '住所', '品名'], status: '有効' },
-    { id: 't-2', name: '佐川送り状CSV', columns: ['出荷日', '荷受人名称', '荷受人郵便番号', '荷受人住所', '個数'], status: '確認中' },
-    { id: 't-3', name: '自社出荷指示書', columns: ['注文番号', 'SKU', '数量', '棚番', '梱包メモ'], status: '有効' },
+    { id: 't-1', name: 'ヤマト送り状CSV', fileName: 'yamato-template.csv', columns: ['お客様管理番号', '送り先氏名', '郵便番号', '住所', '品名'], status: '有効' },
+    { id: 't-2', name: '佐川送り状CSV', fileName: 'sagawa-template.csv', columns: ['出荷日', '荷受人名称', '荷受人郵便番号', '荷受人住所', '個数'], status: '確認中' },
+    { id: 't-3', name: '自社出荷指示書', fileName: 'instruction-template.csv', columns: ['注文番号', 'SKU', '数量', '棚番', '梱包メモ'], status: '有効' },
   ],
+  templateMappings: [
+    { id: 'm-1', templateId: 't-1', target: '注文番号', source: 'お客様管理番号' },
+    { id: 'm-2', templateId: 't-1', target: '顧客名', source: '送り先氏名' },
+    { id: 'm-3', templateId: 't-1', target: '郵便番号', source: '郵便番号' },
+  ],
+  resultSnapshots: [],
   settings: { company: '株式会社サンプルEC', email: 'shipping@example.jp', defaultCarrier: 'ヤマト運輸', cutoffTime: '15:00' },
 };
 
@@ -41,8 +47,12 @@ const keys = {
   orders: 'shipnaviDashboardOrders',
   fareTables: 'shipnaviDashboardFareTables',
   templates: 'shipnaviDashboardTemplates',
+  templateMappings: 'shipnaviDashboardTemplateMappings',
+  resultSnapshots: 'shipnaviDashboardResultSnapshots',
   settings: 'shipnaviDashboardSettings',
 };
+
+const requiredTemplateFields = ['注文番号', '顧客名', '郵便番号', '住所', '商品コード', '数量', '配送会社'];
 
 function seedDashboardData() {
   Object.entries(keys).forEach(([name, key]) => {
@@ -82,10 +92,19 @@ function parseCsv(text) {
   return rows.map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ''])));
 }
 
+function parseCsvHeaders(text) {
+  const firstLine = text.trim().split(/\r?\n/).filter(Boolean)[0] || '';
+  return firstLine.split(',').map((cell) => cell.trim()).filter(Boolean);
+}
+
 function readFileAsText(file, callback) {
   const reader = new FileReader();
   reader.addEventListener('load', () => callback(String(reader.result || '')));
   reader.readAsText(file);
+}
+
+function formatYen(value) {
+  return `¥${Number(value || 0).toLocaleString()}`;
 }
 
 function initAppMenu() {
@@ -101,23 +120,62 @@ function initAppMenu() {
   });
 }
 
+function getBundleCandidates() {
+  const orders = getData('orders');
+  const groups = orders.reduce((acc, order) => {
+    const key = order.postal || '郵便番号未設定';
+    acc[key] = acc[key] || [];
+    acc[key].push(order);
+    return acc;
+  }, {});
+  const candidates = Object.entries(groups)
+    .filter(([, groupedOrders]) => groupedOrders.length > 1)
+    .map(([postal, groupedOrders]) => ({ postal, orders: groupedOrders, saving: (groupedOrders.length - 1) * 320 }));
+
+  if (!candidates.length && orders.length > 1) {
+    candidates.push({ postal: orders[0].postal || '100-0001', orders: orders.slice(0, 2), saving: 280 });
+  }
+
+  return candidates;
+}
+
+function getFareComparisons() {
+  const orders = getData('orders');
+  const carriers = getData('carriers');
+  const fallbackCarrier = { name: '未設定', baseFare: 0 };
+  const cheapestCarrier = carriers.reduce((cheapest, carrier) => Number(carrier.baseFare || 0) < Number(cheapest.baseFare || 0) ? carrier : cheapest, carriers[0] || fallbackCarrier);
+
+  return orders.map((order, index) => {
+    const current = carriers.find((carrier) => carrier.name === order.carrier) || carriers[index % Math.max(carriers.length, 1)] || fallbackCarrier;
+    const currentFare = Number(current.baseFare || 0) + (index * 40);
+    const suggestedFare = Math.max(0, Number(cheapestCarrier.baseFare || 0) + (index * 20));
+    return { order, currentCarrier: current.name, suggestedCarrier: cheapestCarrier.name, currentFare, suggestedFare, saving: Math.max(0, currentFare - suggestedFare) };
+  });
+}
+
+function getEstimatedSavings() {
+  const fareSaving = getFareComparisons().reduce((sum, item) => sum + item.saving, 0);
+  const bundleSaving = getBundleCandidates().reduce((sum, item) => sum + item.saving, 0);
+  return fareSaving + bundleSaving;
+}
+
 function renderDashboard() {
   const target = document.querySelector('#dashboard-view');
   if (!target) return;
-  const products = getData('products');
-  const carriers = getData('carriers');
   const orders = getData('orders');
   const fareTables = getData('fareTables');
+  const bundleCandidates = getBundleCandidates();
   const pending = orders.filter((order) => order.status !== '運賃比較済み').length;
+  const estimatedSavings = getEstimatedSavings();
   target.outerHTML = `
     <section class="stat-grid full-width">
-      <article class="stat-card"><p>登録商品</p><strong>${products.length}</strong></article>
-      <article class="stat-card"><p>配送会社</p><strong>${carriers.length}</strong></article>
-      <article class="stat-card"><p>取込注文</p><strong>${orders.length}</strong></article>
+      <article class="stat-card"><p>今日の注文</p><strong>${orders.length}</strong></article>
+      <article class="stat-card"><p>同梱候補</p><strong>${bundleCandidates.length}</strong></article>
+      <article class="stat-card"><p>推定節約額</p><strong>${formatYen(estimatedSavings)}</strong></article>
       <article class="stat-card"><p>未処理候補</p><strong>${pending}</strong></article>
     </section>
-    <section class="panel"><h2>今日の確認事項</h2><ul class="status-list"><li><span>同梱候補</span><b>${orders.filter((order) => order.status === '同梱候補').length}件</b></li><li><span>運賃表</span><b>${fareTables.length}件</b></li><li><span>出荷指示書</span><b>生成待ち</b></li></ul></section>
-    <section class="panel"><h2>クイック操作</h2><div class="action-grid"><a class="action-card" href="products.html"><b>商品を追加</b><span>SKU・サイズ・重量を登録</span></a><a class="action-card" href="orders.html"><b>注文を取り込む</b><span>CSV / ExcelのMock取込</span></a><a class="action-card" href="results.html"><b>結果を確認</b><span>最安運賃と指示書候補</span></a></div></section>
+    <section class="panel"><h2>今日の確認事項</h2><ul class="status-list"><li><span>注文プレビュー</span><b>${orders.length}件</b></li><li><span>運賃表</span><b>${fareTables.length}件</b></li><li><span>同梱候補</span><b>${bundleCandidates.length}件</b></li></ul></section>
+    <section class="panel"><h2>クイック操作</h2><div class="action-grid"><a class="action-card" href="products.html"><b>商品を追加</b><span>SKU・サイズ・重量を登録</span></a><a class="action-card" href="orders.html"><b>注文を取り込む</b><span>CSV / ExcelのMock取込</span></a><a class="action-card" href="results.html"><b>結果を確認</b><span>運賃比較と同梱候補</span></a></div></section>
   `;
 }
 
@@ -183,7 +241,7 @@ function renderCarriers(filter = '') {
   const keyword = filter.toLowerCase();
   const carriers = getData('carriers').filter((carrier) => `${carrier.name} ${carrier.service}`.toLowerCase().includes(keyword));
   tbody.innerHTML = carriers.map((carrier) => `
-    <tr><td>${escapeHtml(carrier.name)}</td><td>${escapeHtml(carrier.service)}</td><td>¥${Number(carrier.baseFare || 0).toLocaleString()}</td><td>${escapeHtml(carrier.sizes)}</td><td>${escapeHtml(carrier.memo)}</td><td><div class="row-actions"><button class="small-button" data-edit-carrier="${carrier.id}">編集</button><button class="small-button danger" data-delete-carrier="${carrier.id}">削除</button></div></td></tr>
+    <tr><td>${escapeHtml(carrier.name)}</td><td>${escapeHtml(carrier.service)}</td><td>${formatYen(carrier.baseFare)}</td><td>${escapeHtml(carrier.sizes)}</td><td>${escapeHtml(carrier.memo)}</td><td><div class="row-actions"><button class="small-button" data-edit-carrier="${carrier.id}">編集</button><button class="small-button danger" data-delete-carrier="${carrier.id}">削除</button></div></td></tr>
   `).join('') || '<tr><td colspan="6">配送会社がありません。</td></tr>';
 }
 
@@ -227,7 +285,7 @@ function initCarriers() {
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
       const fareTables = getData('fareTables');
-      setData('fareTables', [{ id: makeId('f'), carrier: rows[0]?.carrier || '未設定', fileName: file.name, importedAt: new Date().toLocaleString('ja-JP'), rows: rows.length }, ...fareTables]);
+      setData('fareTables', [{ id: makeId('f'), carrier: rows[0]?.carrier || rows[0]?.['配送会社'] || '未設定', fileName: file.name, importedAt: new Date().toLocaleString('ja-JP'), rows: rows.length }, ...fareTables]);
       showToast(`${rows.length}行の運賃表を取り込みました。`);
     });
   });
@@ -239,8 +297,10 @@ function renderOrders(filter = '') {
   const keyword = filter.toLowerCase();
   const orders = getData('orders').filter((order) => `${order.orderNo} ${order.customer}`.toLowerCase().includes(keyword));
   tbody.innerHTML = orders.map((order) => `
-    <tr><td>${escapeHtml(order.orderNo)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.postal)}</td><td>${escapeHtml(order.items)}</td><td>¥${Number(order.total || 0).toLocaleString()}</td><td>${escapeHtml(order.carrier)}</td><td><span class="badge ${order.status === '運賃比較済み' ? 'green' : 'orange'}">${escapeHtml(order.status)}</span></td></tr>
+    <tr><td>${escapeHtml(order.orderNo)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.postal)}</td><td>${escapeHtml(order.items)}</td><td>${formatYen(order.total)}</td><td>${escapeHtml(order.carrier)}</td><td><span class="badge ${order.status === '運賃比較済み' ? 'green' : 'orange'}">${escapeHtml(order.status)}</span></td></tr>
   `).join('') || '<tr><td colspan="7">注文がありません。</td></tr>';
+  const summary = document.querySelector('#order-preview-summary');
+  if (summary) summary.textContent = `${orders.length}件の注文を表プレビューに表示しています。`;
 }
 
 function initOrders() {
@@ -274,15 +334,55 @@ function renderTemplates() {
   const target = document.querySelector('#templates-view');
   if (!target) return;
   const templates = getData('templates');
-  target.outerHTML = `<section class="template-grid full-width">${templates.map((template) => `<article class="panel"><span class="badge ${template.status === '有効' ? 'green' : 'orange'}">${template.status}</span><h2>${escapeHtml(template.name)}</h2><p>出力項目</p><ul>${template.columns.map((column) => `<li>${escapeHtml(column)}</li>`).join('')}</ul></article>`).join('')}</section>`;
+  const mappings = getData('templateMappings');
+  const activeTemplate = templates[0];
+  const options = (activeTemplate?.columns || []).map((column) => `<option value="${escapeHtml(column)}">${escapeHtml(column)}</option>`).join('');
+  target.outerHTML = `
+    <section class="upload-card full-width"><h2>顧客CSVテンプレートをアップロード</h2><form id="template-upload-form"><label class="file-drop"><span>顧客別の送り状CSVテンプレートを選択してください</span><input type="file" accept=".csv,text/csv" name="file" /></label><button class="button primary" type="submit">テンプレートを保存</button></form></section>
+    <section class="form-card full-width"><h2>字段マッピング</h2><p class="help-text">ShipNavi標準項目に対して、顧客CSVテンプレートの列を割り当てます。</p>${activeTemplate ? `<form id="template-mapping-form" data-template-id="${activeTemplate.id}"><div class="mapping-list">${requiredTemplateFields.map((field) => { const saved = mappings.find((mapping) => mapping.templateId === activeTemplate.id && mapping.target === field); return `<label class="mapping-row"><span>${escapeHtml(field)}</span><select name="${escapeHtml(field)}"><option value="">未設定</option>${(activeTemplate.columns || []).map((column) => `<option value="${escapeHtml(column)}" ${saved?.source === column ? 'selected' : ''}>${escapeHtml(column)}</option>`).join('')}</select></label>`; }).join('')}</div><button class="button secondary" type="submit">マッピングを保存</button></form>` : '<p>テンプレートをアップロードしてください。</p>'}</section>
+    <section class="template-grid full-width">${templates.map((template) => `<article class="panel"><span class="badge ${template.status === '有効' ? 'green' : 'orange'}">${escapeHtml(template.status)}</span><h2>${escapeHtml(template.name)}</h2><p>${escapeHtml(template.fileName || 'CSVテンプレート')}</p><ul>${template.columns.map((column) => `<li>${escapeHtml(column)}</li>`).join('')}</ul></article>`).join('')}</section>
+  `;
+  document.querySelector('#template-upload-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const file = event.currentTarget.elements.file.files[0];
+    if (!file) return showToast('顧客CSVテンプレートを選択してください。');
+    readFileAsText(file, (text) => {
+      const columns = parseCsvHeaders(text);
+      const template = { id: makeId('t'), name: file.name.replace(/\.csv$/i, '') || '顧客CSVテンプレート', fileName: file.name, columns, status: '確認中' };
+      setData('templates', [template, ...getData('templates')]);
+      showToast(`${columns.length}列のテンプレートを保存しました。`);
+      renderTemplates();
+    });
+  });
+  document.querySelector('#template-mapping-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const templateId = event.currentTarget.dataset.templateId;
+    const formData = new FormData(event.currentTarget);
+    const others = getData('templateMappings').filter((mapping) => mapping.templateId !== templateId);
+    const nextMappings = requiredTemplateFields.map((field) => ({ id: makeId('m'), templateId, target: field, source: formData.get(field) || '' })).filter((mapping) => mapping.source);
+    setData('templateMappings', [...nextMappings, ...others]);
+    showToast('字段マッピングを保存しました。');
+  });
 }
 
 function renderResults() {
   const target = document.querySelector('#results-view');
   if (!target) return;
-  const orders = getData('orders');
-  target.outerHTML = `<section class="result-grid full-width"><article class="panel"><h2>自動同梱判定</h2><ul class="status-list"><li><span>同一郵便番号候補</span><b>${Math.max(1, Math.floor(orders.length / 2))}件</b></li><li><span>確認待ち</span><b>${orders.filter((order) => order.status === '同梱候補').length}件</b></li></ul></article><article class="panel"><h2>推定最安運賃比較</h2><ul class="status-list"><li><span>平均削減見込み</span><b>¥142 / 件</b></li><li><span>比較済み</span><b>${orders.filter((order) => order.status === '運賃比較済み').length}件</b></li></ul></article><article class="panel full-width"><h2>出荷指示書生成</h2><p>Mock Dataからピッキング・梱包指示の生成結果を表示します。現在はPDFやDB連携を行わず、画面上のプロトタイプとして保存します。</p><button class="button primary" type="button" id="mock-generate-result">Mock出荷指示書を生成</button></article></section>`;
-  document.querySelector('#mock-generate-result')?.addEventListener('click', () => showToast('Mock出荷指示書を生成しました。'));
+  const fareComparisons = getFareComparisons();
+  const bundleCandidates = getBundleCandidates();
+  const snapshots = getData('resultSnapshots');
+  target.outerHTML = `
+    <section class="stat-grid full-width"><article class="stat-card"><p>Mock運賃比較</p><strong>${fareComparisons.length}</strong></article><article class="stat-card"><p>Mock同梱候補</p><strong>${bundleCandidates.length}</strong></article><article class="stat-card"><p>推定節約額</p><strong>${formatYen(getEstimatedSavings())}</strong></article><article class="stat-card"><p>保存済み結果</p><strong>${snapshots.length}</strong></article></section>
+    <section class="table-card full-width"><div class="table-toolbar"><h2>Mock 運賃比較結果</h2></div><div class="responsive-table"><table><thead><tr><th>注文番号</th><th>現在</th><th>推奨</th><th>現在運賃</th><th>推奨運賃</th><th>節約見込み</th></tr></thead><tbody>${fareComparisons.map((item) => `<tr><td>${escapeHtml(item.order.orderNo)}</td><td>${escapeHtml(item.currentCarrier)}</td><td>${escapeHtml(item.suggestedCarrier)}</td><td>${formatYen(item.currentFare)}</td><td>${formatYen(item.suggestedFare)}</td><td><span class="badge green">${formatYen(item.saving)}</span></td></tr>`).join('')}</tbody></table></div></section>
+    <section class="table-card full-width"><div class="table-toolbar"><h2>Mock 同梱結果</h2></div><div class="responsive-table"><table><thead><tr><th>配送先</th><th>対象注文</th><th>件数</th><th>節約見込み</th><th>状態</th></tr></thead><tbody>${bundleCandidates.map((candidate) => `<tr><td>${escapeHtml(candidate.postal)}</td><td>${candidate.orders.map((order) => escapeHtml(order.orderNo)).join('<br>')}</td><td>${candidate.orders.length}件</td><td>${formatYen(candidate.saving)}</td><td><span class="badge orange">確認待ち</span></td></tr>`).join('') || '<tr><td colspan="5">同梱候補がありません。</td></tr>'}</tbody></table></div></section>
+    <section class="panel full-width"><h2>出荷指示書生成</h2><p>Mock Dataからピッキング・梱包指示の生成結果を表示します。現在はPDFやDB連携を行わず、LocalStorageに結果スナップショットを保存します。</p><button class="button primary" type="button" id="mock-generate-result">Mock結果を保存</button></section>
+  `;
+  document.querySelector('#mock-generate-result')?.addEventListener('click', () => {
+    const snapshot = { id: makeId('r'), savedAt: new Date().toLocaleString('ja-JP'), fareCount: fareComparisons.length, bundleCount: bundleCandidates.length, estimatedSavings: getEstimatedSavings() };
+    setData('resultSnapshots', [snapshot, ...getData('resultSnapshots')]);
+    showToast('Mock結果をLocalStorageに保存しました。');
+    renderResults();
+  });
 }
 
 function renderSettings() {

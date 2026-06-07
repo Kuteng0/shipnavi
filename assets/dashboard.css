@@ -584,3 +584,35 @@ tr:last-child td {
 .full-width {
   grid-column: 1 / -1;
 }
+
+.mapping-list {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.mapping-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fbfdff;
+  font-weight: 800;
+}
+
+.mapping-row select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 12px;
+  background: var(--white);
+  color: var(--text);
+}
+
+@media (min-width: 720px) {
+  .mapping-row {
+    grid-template-columns: 180px 1fr;
+    align-items: center;
+  }
+}
