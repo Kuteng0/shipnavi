@@ -163,76 +163,80 @@ function hasHeaders(headers, requiredHeaders) {
 }
 
 function detectOrderCsvFormat(headers) {
-  if (hasHeaders(headers, ['注文番号', '送付先郵便番号', '送付先住所'])) return '楽天';
-  if (hasHeaders(headers, ['order-id', 'ship-postal-code', 'ship-address-1'])) return 'Amazon';
-  if (hasHeaders(headers, ['Name', 'Shipping Zip', 'Shipping Address1'])) return 'Shopify';
-  if (hasHeaders(headers, ['注文ID', '郵便番号', '住所'])) {
-    return headers.includes('商品コード') ? 'Yahooショッピング' : 'BASE';
-  }
-  if (hasHeaders(headers, ['注文番号', '郵便番号', '住所'])) return 'MakeShop';
-  if (hasHeaders(headers, ['受注番号', '郵便番号', '住所'])) return 'カラーミー';
-  return '';
+  return Object.keys(platformFieldMappings).find((platform) => hasHeaders(headers, platformFieldMappings[platform].detectHeaders || [])) || '';
 }
-
-const orderCsvMappings = {
-  楽天: {
-    orderNo: ['注文番号'],
-    customer: ['送付先氏名', '送付先名', '氏名'],
-    postal: ['送付先郵便番号'],
-    address: ['送付先住所'],
-    sku: ['商品番号', '商品管理番号', 'SKU管理番号', 'SKU'],
-    quantity: ['個数', '数量'],
+const platformFieldMappings = {
+  '\u697d\u5929': {
+    detectHeaders: ['\u6ce8\u6587\u756a\u53f7', '\u5546\u54c1\u756a\u53f7'],
+    orderNo: ['\u6ce8\u6587\u756a\u53f7'],
+    customer: ['\u9001\u4ed8\u5148\u6c0f\u540d'],
+    postal: ['\u9001\u4ed8\u5148\u90f5\u4fbf\u756a\u53f7'],
+    address: ['\u9001\u4ed8\u5148\u4f4f\u6240'],
+    sku: ['\u5546\u54c1\u756a\u53f7'],
+    quantity: ['\u500b\u6570'],
   },
   Amazon: {
+    detectHeaders: ['order-id', 'ship-address-1'],
     orderNo: ['order-id'],
-    customer: ['recipient-name', 'buyer-name'],
+    customer: ['recipient-name'],
     postal: ['ship-postal-code'],
-    address: ['ship-address-1', 'ship-address-2', 'ship-address-3'],
+    address: ['ship-address-1'],
     sku: ['sku'],
     quantity: ['quantity-purchased'],
   },
-  Yahooショッピング: {
-    orderNo: ['注文ID'],
-    customer: ['氏名', 'お届け先氏名', '名前'],
-    postal: ['郵便番号'],
-    address: ['住所'],
-    sku: ['商品コード', '商品ID', 'SKU'],
-    quantity: ['数量', '個数'],
+  'Yahoo\u30b7\u30e7\u30c3\u30d4\u30f3\u30b0': {
+    detectHeaders: ['\u6ce8\u6587ID', '\u304a\u5c4a\u3051\u5148\u6c0f\u540d'],
+    orderNo: ['\u6ce8\u6587ID'],
+    customer: ['\u304a\u5c4a\u3051\u5148\u6c0f\u540d'],
+    postal: ['\u90f5\u4fbf\u756a\u53f7'],
+    address: ['\u4f4f\u6240'],
+    sku: ['\u5546\u54c1\u30b3\u30fc\u30c9'],
+    quantity: ['\u6570\u91cf'],
   },
   Shopify: {
+    detectHeaders: ['Name', 'Shipping Name'],
     orderNo: ['Name'],
-    customer: ['Shipping Name', 'Customer Name', 'Email'],
+    customer: ['Shipping Name'],
     postal: ['Shipping Zip'],
-    address: ['Shipping Address1', 'Shipping Address2'],
-    sku: ['Lineitem sku', 'SKU'],
-    quantity: ['Lineitem quantity', 'Quantity'],
+    address: ['Shipping Address1'],
+    sku: ['Lineitem sku'],
+    quantity: ['Lineitem quantity'],
   },
   BASE: {
-    orderNo: ['注文ID'],
-    customer: ['購入者名', '氏名', '名前'],
-    postal: ['郵便番号'],
-    address: ['住所'],
-    sku: ['商品ID', '商品コード', 'SKU'],
-    quantity: ['数量', '個数'],
+    detectHeaders: ['\u6ce8\u6587ID', '\u8cfc\u5165\u8005\u540d'],
+    orderNo: ['\u6ce8\u6587ID'],
+    customer: ['\u8cfc\u5165\u8005\u540d'],
+    postal: ['\u90f5\u4fbf\u756a\u53f7'],
+    address: ['\u4f4f\u6240'],
+    sku: ['\u5546\u54c1\u30b3\u30fc\u30c9'],
+    quantity: ['\u6570\u91cf'],
   },
   MakeShop: {
-    orderNo: ['注文番号'],
-    customer: ['送付先名', '氏名', '購入者名'],
-    postal: ['郵便番号'],
-    address: ['住所'],
-    sku: ['商品コード', '独自商品コード', 'SKU'],
-    quantity: ['数量', '個数'],
+    detectHeaders: ['\u6ce8\u6587\u756a\u53f7', '\u5546\u54c1\u30b3\u30fc\u30c9'],
+    orderNo: ['\u6ce8\u6587\u756a\u53f7'],
+    customer: ['\u9001\u4ed8\u5148\u540d'],
+    postal: ['\u9001\u4ed8\u5148\u90f5\u4fbf\u756a\u53f7'],
+    address: ['\u9001\u4ed8\u5148\u4f4f\u6240'],
+    sku: ['\u5546\u54c1\u30b3\u30fc\u30c9'],
+    quantity: ['\u6570\u91cf'],
   },
-  カラーミー: {
-    orderNo: ['受注番号'],
-    customer: ['お届け先お名前', '氏名', '購入者名'],
-    postal: ['郵便番号'],
-    address: ['住所'],
-    sku: ['型番', '商品コード', 'SKU'],
-    quantity: ['数量', '個数'],
+  '\u30ab\u30e9\u30fc\u30df\u30fc': {
+    detectHeaders: ['\u53d7\u6ce8\u756a\u53f7', '\u304a\u540d\u524d'],
+    orderNo: ['\u53d7\u6ce8\u756a\u53f7'],
+    customer: ['\u304a\u540d\u524d'],
+    postal: ['\u90f5\u4fbf\u756a\u53f7'],
+    address: ['\u4f4f\u6240'],
+    sku: ['\u5546\u54c1\u578b\u756a'],
+    quantity: ['\u6570\u91cf'],
   },
 };
-
+function getPlatformMissingHeaders(headers, platform) {
+  const mapping = platformFieldMappings[platform];
+  if (!mapping) return [];
+  return ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity']
+    .flatMap((field) => mapping[field] || [])
+    .filter((header) => !headers.includes(header));
+}
 function firstValue(row, fields) {
   return fields.map((field) => normalize(row[field])).find(Boolean) || '';
 }
@@ -242,27 +246,27 @@ function joinedValue(row, fields) {
 }
 
 function normalizePlatformOrderRow(row, platform) {
-  const mapping = orderCsvMappings[platform];
+  const mapping = platformFieldMappings[platform];
   return {
     id: makeId('o'),
-    orderNo: firstValue(row, mapping.orderNo),
-    customer: firstValue(row, mapping.customer),
-    postal: firstValue(row, mapping.postal),
-    address: joinedValue(row, mapping.address),
-    sku: firstValue(row, mapping.sku),
-    quantity: String(Math.max(1, toNumber(firstValue(row, mapping.quantity)) || 1)),
+    orderNo: firstValue(row, mapping?.orderNo || []),
+    customer: firstValue(row, mapping?.customer || []),
+    postal: firstValue(row, mapping?.postal || []),
+    address: joinedValue(row, mapping?.address || []),
+    sku: firstValue(row, mapping?.sku || []),
+    quantity: String(Math.max(1, toNumber(firstValue(row, mapping?.quantity || [])) || 1)),
     sourcePlatform: platform,
   };
 }
-
 function hasStandardOrderFields(order) {
   return ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'].every((field) => normalize(order[field]));
 }
-
 function importOrderCsvRows(rows) {
   const headers = Object.keys(rows[0] || {});
   const platform = detectOrderCsvFormat(headers);
-  if (!platform) return { platform: '', orders: [], successCount: 0, failureCount: rows.length };
+  if (!platform) return { platform: '', orders: [], successCount: 0, failureCount: rows.length, missingHeaders: [] };
+  const missingHeaders = getPlatformMissingHeaders(headers, platform);
+  if (missingHeaders.length) return { platform, orders: [], successCount: 0, failureCount: rows.length, missingHeaders };
   const orders = rows.map((row) => normalizePlatformOrderRow(row, platform));
   const validOrders = orders.filter(hasStandardOrderFields);
   return {
@@ -270,6 +274,7 @@ function importOrderCsvRows(rows) {
     orders: validOrders,
     successCount: validOrders.length,
     failureCount: orders.length - validOrders.length,
+    missingHeaders: [],
   };
 }
 
@@ -658,16 +663,11 @@ function initOrders() {
       const headers = Object.keys(rows[0] || {});
       const platform = detectOrderCsvFormat(headers);
       let importResult;
-
       if (platform) {
-        const orders = rows.map((row) => normalizePlatformOrderRow(row, platform));
-        const validOrders = orders.filter(hasStandardOrderFields);
-        importResult = {
-          platform,
-          orders: validOrders,
-          successCount: validOrders.length,
-          failureCount: orders.length - validOrders.length,
-        };
+        importResult = importOrderCsvRows(rows);
+        if (importResult.missingHeaders.length) {
+          return showToast(`${platform} 不足字段: ${importResult.missingHeaders.join(', ')}`);
+        }
       } else if (hasHeaders(headers, ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'])) {
         const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi' }));
         const validOrders = orders.filter(hasStandardOrderFields);
@@ -676,9 +676,9 @@ function initOrders() {
           orders: validOrders,
           successCount: validOrders.length,
           failureCount: orders.length - validOrders.length,
+          missingHeaders: [],
         };
       }
-
       if (!importResult) return showToast('未対応CSV形式');
       const imported = importResult.orders;
       setData('orders', imported);
