@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="ShipNavi 注文取込プロトタイプ" />
+  <title>注文取込 | ShipNavi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/dashboard.css" />
+</head>
+<body class="app-body" data-page="orders">
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <a class="logo" href="index.html" aria-label="ShipNavi ホーム"><span class="logo-mark">S</span><span>ShipNavi</span></a>
+      <button class="nav-toggle app-menu-toggle" type="button" aria-expanded="false" aria-controls="app-menu"><span class="sr-only">メニューを開閉</span><span></span><span></span><span></span></button>
+      <nav class="sidebar-menu" id="app-menu" aria-label="ダッシュボードナビゲーション"><a href="dashboard.html" class="">Dashboard</a><a href="products.html" class="">商品管理</a><a href="carriers.html" class="">配送会社</a><a href="orders.html" class="active">注文取込</a><a href="templates.html" class="">CSVテンプレート</a><a href="results.html" class="">結果センター</a><a href="settings.html" class="">設定</a></nav>
+    </aside>
+    <main class="app-main">
+      <header class="app-topbar">
+        <div><p class="eyebrow">ShipNavi Prototype</p><h1>注文取込</h1><p>注文CSV・Excelを取り込み、出荷候補データとして保存します。</p></div>
+        <div class="topbar-actions"><a class="button secondary" href="index.html">公式サイトへ戻る</a></div>
+      </header>
+      <div class="dashboard-grid"><section class="upload-card full-width"><h2>注文CSV取込</h2><form id="order-csv-form"><label class="file-drop"><span>注文CSVを選択してください（orderNo,customer,postal,items,total,carrier,status）</span><input type="file" accept=".csv,text/csv" name="file" /></label><button class="button primary" type="submit">CSVを取り込む</button></form></section><section class="upload-card full-width"><h2>注文Excel取込</h2><form id="order-excel-form"><label class="file-drop"><span>Excelファイルを選択してください（プロトタイプではファイル名とMock注文を保存）</span><input type="file" accept=".xlsx,.xls" name="file" /></label><button class="button secondary" type="submit">Excelを取り込む</button></form></section><section class="table-card full-width"><div class="table-toolbar"><h2>取込済み注文</h2><input class="search-input" id="order-search" placeholder="注文番号・顧客名で検索" /></div><div class="responsive-table"><table><thead><tr><th>注文番号</th><th>顧客名</th><th>郵便番号</th><th>商品</th><th>合計</th><th>配送会社</th><th>状態</th></tr></thead><tbody id="orders-table"></tbody></table></div></section></div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="assets/dashboard.js"></script>
+</body>
+</html>

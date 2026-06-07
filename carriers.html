@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="ShipNavi 配送会社プロトタイプ" />
+  <title>配送会社 | ShipNavi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/dashboard.css" />
+</head>
+<body class="app-body" data-page="carriers">
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <a class="logo" href="index.html" aria-label="ShipNavi ホーム"><span class="logo-mark">S</span><span>ShipNavi</span></a>
+      <button class="nav-toggle app-menu-toggle" type="button" aria-expanded="false" aria-controls="app-menu"><span class="sr-only">メニューを開閉</span><span></span><span></span><span></span></button>
+      <nav class="sidebar-menu" id="app-menu" aria-label="ダッシュボードナビゲーション"><a href="dashboard.html" class="">Dashboard</a><a href="products.html" class="">商品管理</a><a href="carriers.html" class="active">配送会社</a><a href="orders.html" class="">注文取込</a><a href="templates.html" class="">CSVテンプレート</a><a href="results.html" class="">結果センター</a><a href="settings.html" class="">設定</a></nav>
+    </aside>
+    <main class="app-main">
+      <header class="app-topbar">
+        <div><p class="eyebrow">ShipNavi Prototype</p><h1>配送会社</h1><p>配送会社と運賃表を管理します。</p></div>
+        <div class="topbar-actions"><a class="button secondary" href="index.html">公式サイトへ戻る</a></div>
+      </header>
+      <div class="dashboard-grid"><section class="form-card full-width"><h2>配送会社を追加・編集</h2><form id="carrier-form"><input type="hidden" name="id" /><div class="form-grid"><label class="input-group">配送会社名<input name="name" required placeholder="ヤマト運輸" /></label><label class="input-group">サービス名<input name="service" required placeholder="宅急便" /></label><label class="input-group">基本運賃(円)<input name="baseFare" type="number" min="0" required placeholder="850" /></label><label class="input-group">対応サイズ<input name="sizes" required placeholder="60,80,100" /></label><label class="input-group full-width">メモ<textarea name="memo" rows="3" placeholder="契約条件や集荷時間など"></textarea></label></div><button class="button primary" type="submit">保存する</button></form></section><section class="upload-card full-width"><h2>運賃表取込</h2><form id="fare-import-form"><label class="file-drop"><span>運賃表CSVを選択してください（carrier,service,size,zone,fare）</span><input type="file" accept=".csv,text/csv" name="file" /></label><button class="button secondary" type="submit">運賃表を取り込む</button></form></section><section class="table-card full-width"><div class="table-toolbar"><h2>配送会社一覧</h2><input class="search-input" id="carrier-search" placeholder="会社名・サービス名で検索" /></div><div class="responsive-table"><table><thead><tr><th>配送会社</th><th>サービス</th><th>基本運賃</th><th>対応サイズ</th><th>メモ</th><th>操作</th></tr></thead><tbody id="carriers-table"></tbody></table></div></section></div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="assets/dashboard.js"></script>
+</body>
+</html>
