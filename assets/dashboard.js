@@ -158,6 +158,117 @@ function requireColumns(rows, columns) {
   return columns.filter((column) => !headers.includes(column));
 }
 
+function hasHeaders(headers, requiredHeaders) {
+  return requiredHeaders.every((header) => headers.includes(header));
+}
+
+function detectOrderCsvFormat(headers) {
+  if (hasHeaders(headers, ['注文番号', '送付先郵便番号', '送付先住所'])) return '楽天';
+  if (hasHeaders(headers, ['order-id', 'ship-postal-code', 'ship-address-1'])) return 'Amazon';
+  if (hasHeaders(headers, ['Name', 'Shipping Zip', 'Shipping Address1'])) return 'Shopify';
+  if (hasHeaders(headers, ['注文ID', '郵便番号', '住所'])) {
+    return headers.includes('商品コード') ? 'Yahooショッピング' : 'BASE';
+  }
+  if (hasHeaders(headers, ['注文番号', '郵便番号', '住所'])) return 'MakeShop';
+  if (hasHeaders(headers, ['受注番号', '郵便番号', '住所'])) return 'カラーミー';
+  return '';
+}
+
+const orderCsvMappings = {
+  楽天: {
+    orderNo: ['注文番号'],
+    customer: ['送付先氏名', '送付先名', '氏名'],
+    postal: ['送付先郵便番号'],
+    address: ['送付先住所'],
+    sku: ['商品番号', '商品管理番号', 'SKU管理番号', 'SKU'],
+    quantity: ['個数', '数量'],
+  },
+  Amazon: {
+    orderNo: ['order-id'],
+    customer: ['recipient-name', 'buyer-name'],
+    postal: ['ship-postal-code'],
+    address: ['ship-address-1', 'ship-address-2', 'ship-address-3'],
+    sku: ['sku'],
+    quantity: ['quantity-purchased'],
+  },
+  Yahooショッピング: {
+    orderNo: ['注文ID'],
+    customer: ['氏名', 'お届け先氏名', '名前'],
+    postal: ['郵便番号'],
+    address: ['住所'],
+    sku: ['商品コード', '商品ID', 'SKU'],
+    quantity: ['数量', '個数'],
+  },
+  Shopify: {
+    orderNo: ['Name'],
+    customer: ['Shipping Name', 'Customer Name', 'Email'],
+    postal: ['Shipping Zip'],
+    address: ['Shipping Address1', 'Shipping Address2'],
+    sku: ['Lineitem sku', 'SKU'],
+    quantity: ['Lineitem quantity', 'Quantity'],
+  },
+  BASE: {
+    orderNo: ['注文ID'],
+    customer: ['購入者名', '氏名', '名前'],
+    postal: ['郵便番号'],
+    address: ['住所'],
+    sku: ['商品ID', '商品コード', 'SKU'],
+    quantity: ['数量', '個数'],
+  },
+  MakeShop: {
+    orderNo: ['注文番号'],
+    customer: ['送付先名', '氏名', '購入者名'],
+    postal: ['郵便番号'],
+    address: ['住所'],
+    sku: ['商品コード', '独自商品コード', 'SKU'],
+    quantity: ['数量', '個数'],
+  },
+  カラーミー: {
+    orderNo: ['受注番号'],
+    customer: ['お届け先お名前', '氏名', '購入者名'],
+    postal: ['郵便番号'],
+    address: ['住所'],
+    sku: ['型番', '商品コード', 'SKU'],
+    quantity: ['数量', '個数'],
+  },
+};
+
+function firstValue(row, fields) {
+  return fields.map((field) => normalize(row[field])).find(Boolean) || '';
+}
+
+function joinedValue(row, fields) {
+  return fields.map((field) => normalize(row[field])).filter(Boolean).join(' ');
+}
+
+function normalizePlatformOrder(row, platform) {
+  const mapping = orderCsvMappings[platform];
+  return {
+    id: makeId('o'),
+    orderNo: firstValue(row, mapping.orderNo),
+    customer: firstValue(row, mapping.customer),
+    postal: firstValue(row, mapping.postal),
+    address: joinedValue(row, mapping.address),
+    sku: firstValue(row, mapping.sku),
+    quantity: String(Math.max(1, toNumber(firstValue(row, mapping.quantity)) || 1)),
+    sourcePlatform: platform,
+  };
+}
+
+function importOrderCsvRows(rows) {
+  const headers = Object.keys(rows[0] || {});
+  const platform = detectOrderCsvFormat(headers);
+  if (!platform) return { platform: '', orders: [], successCount: 0, failureCount: rows.length };
+  const orders = rows.map((row) => normalizePlatformOrder(row, platform));
+  const validOrders = orders.filter((order) => order.orderNo && order.postal && order.address && order.sku);
+  return {
+    platform,
+    orders: validOrders,
+    successCount: validOrders.length,
+    failureCount: orders.length - validOrders.length,
+  };
+}
+
 function initAppMenu() {
   const toggle = document.querySelector('.app-menu-toggle');
   const menu = document.querySelector('#app-menu');
@@ -179,6 +290,7 @@ function normalizeOrder(row) {
     address: normalize(row.address),
     sku: normalize(row.sku),
     quantity: String(Math.max(1, toNumber(row.quantity) || 1)),
+    sourcePlatform: normalize(row.sourcePlatform) || 'ShipNavi',
   };
 }
 
@@ -336,6 +448,7 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
     customer: orders[0]?.customer || '',
     postal: orders[0]?.postal || '',
     address: orders[0]?.address || '',
+    sourcePlatform: [...new Set(orders.map((order) => order.sourcePlatform).filter(Boolean))].join(', '),
     items: Object.entries(itemMap).map(([sku, quantity]) => `${sku} x ${quantity}`).join(', '),
     estimatedSize: estimatedSize || '',
     totalWeight,
@@ -538,12 +651,19 @@ function initOrders() {
     if (!file) return showToast('注文CSVを選択してください。');
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
-      const missing = requireColumns(rows, ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity']);
-      if (missing.length) return showToast(`不足字段: ${missing.join(', ')}`);
-      const imported = rows.map(normalizeOrder).filter((order) => order.orderNo && order.sku);
+      const headers = Object.keys(rows[0] || {});
+      let importResult = importOrderCsvRows(rows);
+      if (!importResult.platform && hasHeaders(headers, ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'])) {
+        const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi' })).filter((order) => order.orderNo && order.postal && order.address && order.sku);
+        importResult = { platform: 'ShipNavi', orders, successCount: orders.length, failureCount: rows.length - orders.length };
+      }
+      if (!importResult.platform) return showToast('未対応CSV形式');
+      const imported = importResult.orders;
       setData('orders', imported);
       renderOrders(search?.value || '');
-      showToast(`${imported.length}件の注文CSVを保存しました。`);
+      const summary = document.querySelector('#order-preview-summary');
+      if (summary) summary.textContent = `平台: ${importResult.platform} / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount}`;
+      showToast(`平台: ${importResult.platform} / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount}`);
     });
   });
   document.querySelector('#order-excel-form')?.addEventListener('submit', (event) => {
@@ -583,6 +703,7 @@ function renderResults() {
         <td>${escapeHtml(row.shipmentGroupId)}</td>
         <td>${escapeHtml(row.orderNos)}</td>
         <td>${escapeHtml(row.customer)}</td>
+        <td>${escapeHtml(row.sourcePlatform || '-')}</td>
         <td>${escapeHtml(row.postal)}</td>
         <td>${escapeHtml(row.address)}</td>
         <td>${escapeHtml(row.items)}</td>
@@ -596,7 +717,7 @@ function renderResults() {
         <td><span class="badge green">${formatYen(row.savings)}</span></td>
       </tr>
     `).join('')
-    : `<tr><td colspan="14">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
+    : `<tr><td colspan="15">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
   target.outerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>注文数</p><strong>${summary.orderCount}</strong></article>
@@ -607,12 +728,12 @@ function renderResults() {
     ${alertPanel}
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV导出</button></div>
-      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>節約金額</th></tr></thead>
+      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>節約金額</th></tr></thead>
       <tbody>${shipmentRows}</tbody></table></div>
     </section>
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>同梱結果</h2></div>
-      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.postal)}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="10">注文データがありません。</td></tr>'}</tbody></table></div>
+      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.sourcePlatform || '-')}</td><td>${escapeHtml(row.postal)}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="11">注文データがありません。</td></tr>'}</tbody></table></div>
     </section>
   `;
   document.querySelector('#export-results-csv')?.addEventListener('click', () => {
