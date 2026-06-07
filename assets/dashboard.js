@@ -241,7 +241,7 @@ function joinedValue(row, fields) {
   return fields.map((field) => normalize(row[field])).filter(Boolean).join(' ');
 }
 
-function normalizePlatformOrder(row, platform) {
+function normalizePlatformOrderRow(row, platform) {
   const mapping = orderCsvMappings[platform];
   return {
     id: makeId('o'),
@@ -255,12 +255,16 @@ function normalizePlatformOrder(row, platform) {
   };
 }
 
+function hasStandardOrderFields(order) {
+  return ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'].every((field) => normalize(order[field]));
+}
+
 function importOrderCsvRows(rows) {
   const headers = Object.keys(rows[0] || {});
   const platform = detectOrderCsvFormat(headers);
   if (!platform) return { platform: '', orders: [], successCount: 0, failureCount: rows.length };
-  const orders = rows.map((row) => normalizePlatformOrder(row, platform));
-  const validOrders = orders.filter((order) => order.orderNo && order.postal && order.address && order.sku);
+  const orders = rows.map((row) => normalizePlatformOrderRow(row, platform));
+  const validOrders = orders.filter(hasStandardOrderFields);
   return {
     platform,
     orders: validOrders,
@@ -652,18 +656,37 @@ function initOrders() {
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
       const headers = Object.keys(rows[0] || {});
-      let importResult = importOrderCsvRows(rows);
-      if (!importResult.platform && hasHeaders(headers, ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'])) {
-        const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi' })).filter((order) => order.orderNo && order.postal && order.address && order.sku);
-        importResult = { platform: 'ShipNavi', orders, successCount: orders.length, failureCount: rows.length - orders.length };
+      const platform = detectOrderCsvFormat(headers);
+      let importResult;
+
+      if (platform) {
+        const orders = rows.map((row) => normalizePlatformOrderRow(row, platform));
+        const validOrders = orders.filter(hasStandardOrderFields);
+        importResult = {
+          platform,
+          orders: validOrders,
+          successCount: validOrders.length,
+          failureCount: orders.length - validOrders.length,
+        };
+      } else if (hasHeaders(headers, ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'])) {
+        const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi' }));
+        const validOrders = orders.filter(hasStandardOrderFields);
+        importResult = {
+          platform: 'ShipNavi',
+          orders: validOrders,
+          successCount: validOrders.length,
+          failureCount: orders.length - validOrders.length,
+        };
       }
-      if (!importResult.platform) return showToast('未対応CSV形式');
+
+      if (!importResult) return showToast('未対応CSV形式');
       const imported = importResult.orders;
       setData('orders', imported);
       renderOrders(search?.value || '');
       const summary = document.querySelector('#order-preview-summary');
-      if (summary) summary.textContent = `平台: ${importResult.platform} / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount}`;
-      showToast(`平台: ${importResult.platform} / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount}`);
+      const message = `${importResult.platform} CSVを取り込みました / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount}`;
+      if (summary) summary.textContent = message;
+      showToast(message);
     });
   });
   document.querySelector('#order-excel-form')?.addEventListener('submit', (event) => {
