@@ -91,14 +91,15 @@ function showToast(message) {
 }
 
 function parseCsv(text) {
+  const sanitizedText = String(text || '').replace(/^\uFEFF/, '');
   const rows = [];
   let row = [];
   let cell = '';
   let quoted = false;
 
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
+  for (let index = 0; index < sanitizedText.length; index += 1) {
+    const char = sanitizedText[index];
+    const next = sanitizedText[index + 1];
 
     if (char === '"' && quoted && next === '"') {
       cell += '"';
@@ -122,7 +123,7 @@ function parseCsv(text) {
   row.push(cell.trim());
   if (row.some((value) => value !== '')) rows.push(row);
 
-  const headers = (rows.shift() || []).map((header) => header.trim());
+  const headers = (rows.shift() || []).map((header) => normalizeHeader(header));
   return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ''])));
 }
 
@@ -149,13 +150,307 @@ function downloadCsv(fileName, rows) {
 
 function readFileAsText(file, callback) {
   const reader = new FileReader();
-  reader.addEventListener('load', () => callback(String(reader.result || '')));
+  reader.addEventListener('load', () => callback(String(reader.result || '').replace(/^\uFEFF/, '')));
   reader.readAsText(file);
+}
+
+function normalizeHeader(value) {
+  return String(value ?? '')
+    .replace(/^\uFEFF/, '')
+    .normalize('NFKC')
+    .replace(/[【】「」『』]/g, '')
+    .replace(/[（]/g, '(')
+    .replace(/[）]/g, ')')
+    .replace(/[：]/g, ':')
+    .replace(/^[\s\u3000]+|[\s\u3000]+$/g, '')
+    .replace(/[\s\u3000]+/g, ' ')
+    .replace(/\s*:\s*/g, ':')
+    .replace(/\s*\(\s*/g, '(')
+    .replace(/\s*\)\s*/g, ')')
+    .trim()
+    .toLowerCase();
+}
+
+function compactText(value) {
+  return String(value ?? '').replace(/[\s\u3000]+/g, ' ').trim();
+}
+
+function normalizePostal(value) {
+  return compactText(value).replace(/^〒/, '');
+}
+
+function normalizeJapaneseAddress(parts) {
+  return parts.map((part) => compactText(part)).filter(Boolean).join('');
 }
 
 function requireColumns(rows, columns) {
   const headers = Object.keys(rows[0] || {});
   return columns.filter((column) => !headers.includes(column));
+}
+
+function hasHeaders(headers, requiredHeaders) {
+  const normalizedHeaders = headers.map((header) => normalizeHeader(header));
+  return requiredHeaders.every((header) => normalizedHeaders.includes(normalizeHeader(header)));
+}
+
+function hasAnyHeader(headers, candidateHeaders) {
+  const normalizedHeaders = headers.map((header) => normalizeHeader(header));
+  return candidateHeaders.some((header) => normalizedHeaders.includes(normalizeHeader(header)));
+}
+
+function fieldCandidate(raw) {
+  return typeof raw === 'string' ? { fields: [raw], join: '' } : raw;
+}
+
+function headerSet(headers) {
+  return new Set(headers.map((header) => normalizeHeader(header)));
+}
+
+const standardOrderFields = ['orderNo', 'customer', 'address', 'sku', 'quantity'];
+
+const platformFieldMappings = {
+  'ShipNavi標準': {
+    requiredSignals: ['orderno', 'customer', 'address', 'sku', 'quantity'],
+    optionalSignals: ['postal', 'sourceplatform'],
+    fieldCandidates: {
+      orderNo: ['orderNo'],
+      customer: ['customer'],
+      postal: ['postal'],
+      address: ['address'],
+      sku: ['sku'],
+      quantity: ['quantity'],
+    },
+  },
+  '楽天': {
+    requiredSignals: ['注文番号', '個数'],
+    optionalSignals: ['注文者名字', '注文者名前', '送付先氏名', '送付先郵便番号', '送付先住所:都道府県', '送付先住所:都市区', '送付先住所:町以降', '送付先住所', '商品番号', '商品管理番号', '商品名'],
+    fieldCandidates: {
+      orderNo: ['注文番号'],
+      customer: [{ fields: ['注文者名字', '注文者名前'], join: '' }, '送付先氏名'],
+      postal: ['送付先郵便番号'],
+      address: [{ fields: ['送付先住所:都道府県', '送付先住所:都市区', '送付先住所:町以降'], join: '' }, '送付先住所'],
+      sku: ['商品番号', '商品管理番号'],
+      productName: ['商品名'],
+      quantity: ['個数'],
+    },
+  },
+  Amazon: {
+    requiredSignals: ['order-id', 'quantity-purchased'],
+    optionalSignals: ['buyer-email', 'recipient-name', 'ship-postal-code', 'ship-state', 'ship-city', 'ship-address-1', 'sku', 'product-name'],
+    fieldCandidates: {
+      orderNo: ['order-id'],
+      customer: ['buyer-email', 'recipient-name'],
+      postal: ['ship-postal-code'],
+      address: [
+        { fields: ['ship-state', 'ship-city', 'ship-address-1'], join: '' },
+        { fields: ['ship-state', 'ship-city'], join: '' },
+      ],
+      sku: ['sku'],
+      productName: ['product-name'],
+      quantity: ['quantity-purchased'],
+    },
+  },
+  'Yahooショッピング': {
+    requiredSignals: ['注文id', '数量'],
+    optionalSignals: ['お届け先氏名', '郵便番号', '住所', '商品コード'],
+    fieldCandidates: {
+      orderNo: ['注文ID'],
+      customer: ['お届け先氏名'],
+      postal: ['郵便番号'],
+      address: ['住所'],
+      sku: ['商品コード'],
+      productName: ['商品名'],
+      quantity: ['数量'],
+    },
+  },
+  Shopify: {
+    requiredSignals: ['name', 'lineitem quantity'],
+    optionalSignals: ['shipping name', 'shipping zip', 'shipping province', 'shipping city', 'shipping address1', 'lineitem sku'],
+    fieldCandidates: {
+      orderNo: ['Name'],
+      customer: ['Shipping Name'],
+      postal: ['Shipping Zip'],
+      address: [
+        { fields: ['Shipping Province', 'Shipping City', 'Shipping Address1'], join: '' },
+        { fields: ['Shipping Province', 'Shipping City'], join: '' },
+        'Shipping Address1',
+      ],
+      sku: ['Lineitem sku'],
+      productName: ['Lineitem name'],
+      quantity: ['Lineitem quantity'],
+    },
+  },
+  BASE: {
+    requiredSignals: ['注文id', '数量'],
+    optionalSignals: ['購入者名', '郵便番号', '住所', '商品コード'],
+    fieldCandidates: {
+      orderNo: ['注文ID'],
+      customer: ['購入者名'],
+      postal: ['郵便番号'],
+      address: ['住所'],
+      sku: ['商品コード'],
+      productName: ['商品名'],
+      quantity: ['数量'],
+    },
+  },
+  MakeShop: {
+    requiredSignals: ['注文番号', '数量'],
+    optionalSignals: ['送付先名', '送付先郵便番号', '送付先住所', '商品コード'],
+    fieldCandidates: {
+      orderNo: ['注文番号'],
+      customer: ['送付先名'],
+      postal: ['送付先郵便番号'],
+      address: ['送付先住所'],
+      sku: ['商品コード'],
+      productName: ['商品名'],
+      quantity: ['数量'],
+    },
+  },
+  'カラーミー': {
+    requiredSignals: ['受注番号', '数量'],
+    optionalSignals: ['お名前', '郵便番号', '住所', '商品型番'],
+    fieldCandidates: {
+      orderNo: ['受注番号'],
+      customer: ['お名前'],
+      postal: ['郵便番号'],
+      address: ['住所'],
+      sku: ['商品型番'],
+      productName: ['商品名'],
+      quantity: ['数量'],
+    },
+  },
+};
+
+function hasResolvableField(headers, candidates) {
+  const normalizedHeaders = headerSet(headers);
+  return (candidates || []).some((candidate) => {
+    const resolved = fieldCandidate(candidate);
+    return resolved.fields.every((field) => normalizedHeaders.has(normalizeHeader(field)));
+  });
+}
+
+function detectOrderCsvFormat(headers) {
+  const candidates = Object.entries(platformFieldMappings)
+    .map(([platform, config]) => {
+      const normalizedHeaders = headerSet(headers);
+      const requiredMatches = (config.requiredSignals || []).filter((signal) => normalizedHeaders.has(normalizeHeader(signal))).length;
+      const optionalMatches = (config.optionalSignals || []).filter((signal) => normalizedHeaders.has(normalizeHeader(signal))).length;
+      const fieldCoverage = standardOrderFields.filter((field) => hasResolvableField(headers, config.fieldCandidates?.[field] || []) || (field === 'sku' && hasResolvableField(headers, config.fieldCandidates?.productName || []))).length;
+      return {
+        platform,
+        score: (requiredMatches * 5) + (optionalMatches * 2) + (fieldCoverage * 3),
+        requiredMatches,
+        fieldCoverage,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const best = candidates[0];
+  if (!best) return 'unknown';
+  const threshold = best.platform === 'ShipNavi標準' ? 18 : 12;
+  return (best.score >= threshold && best.requiredMatches >= 1 && best.fieldCoverage >= 4) ? best.platform : 'unknown';
+}
+
+function getPlatformMissingHeaders(headers, platform) {
+  const mapping = platformFieldMappings[platform];
+  if (!mapping?.fieldCandidates) return [];
+  const missing = standardOrderFields
+    .flatMap((field) => {
+      if (field === 'sku') {
+        return hasResolvableField(headers, mapping.fieldCandidates.sku || []) || hasResolvableField(headers, mapping.fieldCandidates.productName || [])
+          ? []
+          : (mapping.fieldCandidates.sku || []).flatMap((candidate) => fieldCandidate(candidate).fields);
+      }
+      return hasResolvableField(headers, mapping.fieldCandidates[field] || [])
+        ? []
+        : (mapping.fieldCandidates[field] || []).flatMap((candidate) => fieldCandidate(candidate).fields);
+    });
+  return missing.filter((header, index, list) => list.findIndex((item) => normalizeHeader(item) === normalizeHeader(header)) === index);
+}
+
+function resolveField(row, candidates) {
+  return (candidates || []).reduce((found, candidate) => {
+    if (found) return found;
+    const resolved = fieldCandidate(candidate);
+    const values = resolved.fields.map((field) => compactText(row[normalizeHeader(field)]));
+    return values.every(Boolean) ? values.join(resolved.join ?? '') : '';
+  }, '');
+}
+
+function normalizePlatformOrderRow(row, platform) {
+  const mapping = platformFieldMappings[platform];
+  const orderNo = resolveField(row, mapping?.fieldCandidates?.orderNo || []);
+  const customer = resolveField(row, mapping?.fieldCandidates?.customer || []);
+  const postal = normalizePostal(resolveField(row, mapping?.fieldCandidates?.postal || []));
+  const address = compactText(resolveField(row, mapping?.fieldCandidates?.address || []));
+  let sku = resolveField(row, mapping?.fieldCandidates?.sku || []);
+  const productName = resolveField(row, mapping?.fieldCandidates?.productName || []);
+  const warnings = [];
+
+  if (!postal) warnings.push('郵便番号未設定');
+  if (!sku && productName) {
+    sku = productName;
+    warnings.push('商品名をSKUとして使用');
+  }
+
+  return {
+    id: makeId('o'),
+    orderNo,
+    customer,
+    postal,
+    address,
+    sku,
+    quantity: String(Math.max(1, toNumber(resolveField(row, mapping?.fieldCandidates?.quantity || [])) || 1)),
+    sourcePlatform: platform,
+    warnings,
+  };
+}
+
+function hasStandardOrderFields(order) {
+  return standardOrderFields.every((field) => normalize(order[field]));
+}
+
+function importOrderCsvRows(rows) {
+  const headers = Object.keys(rows[0] || {});
+  const platform = detectOrderCsvFormat(headers);
+  if (platform === 'unknown') {
+    return {
+      platform: 'unknown',
+      orders: [],
+      successCount: 0,
+      failureCount: rows.length,
+      warningCount: 0,
+      warningDetails: [],
+      missingHeaders: [],
+      detectedHeaders: headers,
+    };
+  }
+  const missingHeaders = getPlatformMissingHeaders(headers, platform);
+  if (missingHeaders.length) {
+    return {
+      platform,
+      orders: [],
+      successCount: 0,
+      failureCount: rows.length,
+      warningCount: 0,
+      warningDetails: [],
+      missingHeaders,
+      detectedHeaders: headers,
+    };
+  }
+  const normalizedOrders = rows.map((row) => normalizePlatformOrderRow(row, platform));
+  const validOrders = normalizedOrders.filter(hasStandardOrderFields);
+  const warningDetails = [...new Set(validOrders.flatMap((order) => order.warnings || []))];
+  return {
+    platform,
+    orders: validOrders,
+    successCount: validOrders.length,
+    failureCount: normalizedOrders.length - validOrders.length,
+    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    warningDetails,
+    missingHeaders: [],
+    detectedHeaders: headers,
+  };
 }
 
 function initAppMenu() {
@@ -175,10 +470,12 @@ function normalizeOrder(row) {
     id: makeId('o'),
     orderNo: normalize(row.orderNo),
     customer: normalize(row.customer),
-    postal: normalize(row.postal),
-    address: normalize(row.address),
+    postal: normalizePostal(row.postal),
+    address: compactText(row.address),
     sku: normalize(row.sku),
     quantity: String(Math.max(1, toNumber(row.quantity) || 1)),
+    sourcePlatform: normalize(row.sourcePlatform) || 'ShipNavi',
+    warnings: Array.isArray(row.warnings) ? row.warnings : (!normalizePostal(row.postal) ? ['\u90f5\u4fbf\u756a\u53f7\u672a\u8a2d\u5b9a'] : []),
   };
 }
 
@@ -202,9 +499,35 @@ function normalizeFare(row) {
     carrier: normalizeCarrier(row.carrier),
     service: normalize(row.service),
     size: normalizeSize(row.size),
+    weightLimit: String(toNumber(row.weightLimit || row.weight)),
     zone: normalize(row.zone) || 'default',
     fare: String(toNumber(row.fare)),
   };
+}
+
+function detectFareTableFormat(headers, rows) {
+  const normalizedHeaders = headers.map((header) => normalizeHeader(header));
+  if (hasHeaders(normalizedHeaders, ['carrier', 'service', 'size', 'zone', 'fare'])) return 'vertical';
+  const firstHeader = normalizedHeaders[0];
+  const zoneSignals = ['北海道', '関東', '東京', '関西', '沖縄', '九州'];
+  if (['size', 'サイズ', '総長', 'サイズ(cm)'].includes(firstHeader) && normalizedHeaders.some((header) => zoneSignals.includes(header))) return 'matrix';
+  return 'unknown';
+}
+
+function normalizeFareMatrix(rows, carrierName = 'ヤマト', serviceName = '宅急便') {
+  if (!rows.length) return [];
+  const headers = Object.keys(rows[0] || {}).map((header) => normalizeHeader(header));
+  const sizeHeader = headers[0];
+  const weightHeader = headers.find((header) => ['weight', '重量', '重量(kg)'].includes(header));
+  const zoneHeaders = headers.filter((header) => header !== sizeHeader && header !== weightHeader);
+  return rows.flatMap((row) => zoneHeaders.map((zone) => normalizeFare({
+    carrier: carrierName,
+    service: serviceName,
+    size: row[sizeHeader],
+    weightLimit: weightHeader ? row[weightHeader] : '',
+    zone,
+    fare: row[zone],
+  }))).filter((fare) => fare.size && fare.zone && toNumber(fare.fare) > 0);
 }
 
 function getProductsBySku() {
@@ -230,7 +553,14 @@ function getDataHealth() {
   };
 }
 
-function getZoneByPostal(postal) {
+function getZoneByPostal(postal, address = '') {
+  const normalizedAddress = compactText(address);
+  if (normalizedAddress.includes('東京都')) return '東京';
+  if (['神奈川県', '埼玉県', '千葉県', '茨城県', '栃木県', '群馬県', '山梨県'].some((name) => normalizedAddress.includes(name))) return '関東';
+  if (['大阪府', '京都府', '兵庫県', '奈良県', '滋賀県', '和歌山県'].some((name) => normalizedAddress.includes(name))) return '関西';
+  if (normalizedAddress.includes('北海道')) return '北海道';
+  if (normalizedAddress.includes('沖縄県')) return '沖縄';
+  if (['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'].some((name) => normalizedAddress.includes(name))) return '九州';
   return 'default';
 }
 
@@ -324,11 +654,12 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
 
   const isBundled = orders.length > 1;
   const estimatedSize = missingProduct ? null : (isBundled ? estimateBundledSize(totalVolume, largestItemSize) : largestItemSize);
-  const zone = getZoneByPostal(orders[0]?.postal);
+  const zone = getZoneByPostal(orders[0]?.postal, orders[0]?.address);
   const fareOptions = missingProduct ? [] : getFareOptions(estimatedSize, zone);
   const best = fareOptions[0] || null;
   const second = fareOptions[1] || null;
-  const status = missingProduct ? '商品未登録' : (best ? '' : '対応運賃なし');
+  const warningTexts = [...new Set(orders.flatMap((order) => order.warnings || []))];
+  const status = missingProduct ? '商品未登録' : (best ? warningTexts.join(' / ') : '対応運賃なし');
 
   return {
     shipmentGroupId: `SG-${String(index + 1).padStart(3, '0')}`,
@@ -336,6 +667,7 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
     customer: orders[0]?.customer || '',
     postal: orders[0]?.postal || '',
     address: orders[0]?.address || '',
+    sourcePlatform: [...new Set(orders.map((order) => order.sourcePlatform).filter(Boolean))].join(', '),
     items: Object.entries(itemMap).map(([sku, quantity]) => `${sku} x ${quantity}`).join(', '),
     estimatedSize: estimatedSize || '',
     totalWeight,
@@ -499,9 +831,19 @@ function initCarriers() {
     if (!file) return showToast('運賃表CSVを選択してください。');
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
-      const missing = requireColumns(rows, ['carrier', 'service', 'size', 'zone', 'fare']);
-      if (missing.length) return showToast(`不足字段: ${missing.join(', ')}`);
-      const imported = rows.map(normalizeFare).filter((fare) => supportedCarriers.includes(fare.carrier));
+      const headers = Object.keys(rows[0] || {});
+      const carrierName = normalizeCarrier(form?.elements?.name?.value || form?.elements?.carrier?.value || 'ヤマト');
+      const serviceName = normalize(form?.elements?.service?.value || '宅急便');
+      let imported = [];
+      const fareFormat = detectFareTableFormat(headers, rows);
+      if (fareFormat === 'vertical') {
+        imported = rows.map(normalizeFare).filter((fare) => supportedCarriers.includes(fare.carrier));
+      } else if (fareFormat === 'matrix') {
+        imported = normalizeFareMatrix(rows, carrierName, serviceName);
+      } else {
+        const missing = requireColumns(rows, ['carrier', 'service', 'size', 'zone', 'fare']);
+        return showToast(`不足字段: ${missing.join(', ')}`);
+      }
       setData('fareTables', imported);
       setData('carriers', imported);
       renderCarriers(search?.value || '');
@@ -518,7 +860,7 @@ function renderOrders(filter = '') {
   const orders = getData('orders').filter((order) => `${order.orderNo} ${order.customer} ${order.sku}`.toLowerCase().includes(keyword));
   tbody.innerHTML = orders.map((order) => `
     <tr>
-      <td>${escapeHtml(order.orderNo)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.postal)}</td>
+      <td>${escapeHtml(order.orderNo)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.postal || '郵便番号未設定')}</td>
       <td>${escapeHtml(order.sku)} x ${escapeHtml(order.quantity)}</td><td>${escapeHtml(order.address)}</td><td>${bundleIds.has(order.id) ? '同梱候補' : '単独'}</td>
       <td><span class="badge ${bundleIds.has(order.id) ? 'green' : 'orange'}">${bundleIds.has(order.id) ? '可同梱' : '確認済'}</span></td>
     </tr>
@@ -535,15 +877,46 @@ function initOrders() {
   document.querySelector('#order-csv-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const file = event.currentTarget.elements.file.files[0];
-    if (!file) return showToast('注文CSVを選択してください。');
+    if (!file) return showToast('\u6ce8\u6587CSV\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044\u3002');
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
-      const missing = requireColumns(rows, ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity']);
-      if (missing.length) return showToast(`不足字段: ${missing.join(', ')}`);
-      const imported = rows.map(normalizeOrder).filter((order) => order.orderNo && order.sku);
+      const headers = Object.keys(rows[0] || {});
+      let importResult;
+      const platform = detectOrderCsvFormat(headers);
+      if (platform !== 'unknown') {
+        importResult = importOrderCsvRows(rows);
+        if (importResult.missingHeaders.length) {
+          return showToast(`${platform} 不足字段: ${importResult.missingHeaders.join(', ')}`);
+        }
+      } else if (hasHeaders(headers, ['orderNo', 'customer', 'address', 'sku', 'quantity'])) {
+        const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi' }));
+        const validOrders = orders.filter(hasStandardOrderFields);
+        importResult = {
+          platform: 'ShipNavi',
+          orders: validOrders,
+          successCount: validOrders.length,
+          failureCount: orders.length - validOrders.length,
+          missingHeaders: [],
+          warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+          warningDetails: [...new Set(validOrders.flatMap((order) => order.warnings || []))],
+          detectedHeaders: headers,
+        };
+      }
+      if (!importResult || importResult.platform === 'unknown') {
+        const detectedHeaderText = headers.length ? headers.join(', ') : 'なし';
+        const message = `未対応CSV形式 / headers: ${detectedHeaderText} / 後続で手動マッピング対応予定`;
+        const summary = document.querySelector('#order-preview-summary');
+        if (summary) summary.textContent = message;
+        return showToast(message);
+      }
+      const imported = importResult.orders;
       setData('orders', imported);
       renderOrders(search?.value || '');
-      showToast(`${imported.length}件の注文CSVを保存しました。`);
+      const summary = document.querySelector('#order-preview-summary');
+      const warningText = (importResult.warningDetails || []).join('、') || 'なし';
+      const message = `${importResult.platform} CSVを取り込みました / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0} / 警告内容: ${warningText}`;
+      if (summary) summary.textContent = message;
+      showToast(message);
     });
   });
   document.querySelector('#order-excel-form')?.addEventListener('submit', (event) => {
@@ -583,7 +956,8 @@ function renderResults() {
         <td>${escapeHtml(row.shipmentGroupId)}</td>
         <td>${escapeHtml(row.orderNos)}</td>
         <td>${escapeHtml(row.customer)}</td>
-        <td>${escapeHtml(row.postal)}</td>
+        <td>${escapeHtml(row.sourcePlatform || '-')}</td>
+        <td>${escapeHtml(row.postal || '郵便番号未設定')}</td>
         <td>${escapeHtml(row.address)}</td>
         <td>${escapeHtml(row.items)}</td>
         <td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td>
@@ -596,7 +970,7 @@ function renderResults() {
         <td><span class="badge green">${formatYen(row.savings)}</span></td>
       </tr>
     `).join('')
-    : `<tr><td colspan="14">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
+    : `<tr><td colspan="15">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
   target.outerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>注文数</p><strong>${summary.orderCount}</strong></article>
@@ -607,12 +981,12 @@ function renderResults() {
     ${alertPanel}
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV导出</button></div>
-      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>節約金額</th></tr></thead>
+      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>節約金額</th></tr></thead>
       <tbody>${shipmentRows}</tbody></table></div>
     </section>
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>同梱結果</h2></div>
-      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.postal)}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="10">注文データがありません。</td></tr>'}</tbody></table></div>
+      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.sourcePlatform || '-')}</td><td>${escapeHtml(row.postal || '郵便番号未設定')}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="11">注文データがありません。</td></tr>'}</tbody></table></div>
     </section>
   `;
   document.querySelector('#export-results-csv')?.addEventListener('click', () => {
