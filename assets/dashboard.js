@@ -91,14 +91,15 @@ function showToast(message) {
 }
 
 function parseCsv(text) {
+  const sanitizedText = String(text || '').replace(/^\uFEFF/, '');
   const rows = [];
   let row = [];
   let cell = '';
   let quoted = false;
 
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
+  for (let index = 0; index < sanitizedText.length; index += 1) {
+    const char = sanitizedText[index];
+    const next = sanitizedText[index + 1];
 
     if (char === '"' && quoted && next === '"') {
       cell += '"';
@@ -122,7 +123,7 @@ function parseCsv(text) {
   row.push(cell.trim());
   if (row.some((value) => value !== '')) rows.push(row);
 
-  const headers = (rows.shift() || []).map((header) => header.trim());
+  const headers = (rows.shift() || []).map((header) => normalizeHeader(header));
   return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ''])));
 }
 
@@ -149,8 +150,24 @@ function downloadCsv(fileName, rows) {
 
 function readFileAsText(file, callback) {
   const reader = new FileReader();
-  reader.addEventListener('load', () => callback(String(reader.result || '')));
+  reader.addEventListener('load', () => callback(String(reader.result || '').replace(/^\uFEFF/, '')));
   reader.readAsText(file);
+}
+
+function normalizeHeader(value) {
+  return String(value ?? '').replace(/^\uFEFF/, '').replace(/^[\s\u3000]+|[\s\u3000]+$/g, '');
+}
+
+function compactText(value) {
+  return String(value ?? '').replace(/[\s\u3000]+/g, ' ').trim();
+}
+
+function normalizePostal(value) {
+  return compactText(value).replace(/^〒/, '');
+}
+
+function normalizeJapaneseAddress(parts) {
+  return parts.map((part) => compactText(part)).filter(Boolean).join('');
 }
 
 function requireColumns(rows, columns) {
@@ -162,25 +179,36 @@ function hasHeaders(headers, requiredHeaders) {
   return requiredHeaders.every((header) => headers.includes(header));
 }
 
+function hasAnyHeader(headers, candidateHeaders) {
+  return candidateHeaders.some((header) => headers.includes(header));
+}
+
 function detectOrderCsvFormat(headers) {
   return Object.keys(platformFieldMappings).find((platform) => hasHeaders(headers, platformFieldMappings[platform].detectHeaders || [])) || '';
 }
 const platformFieldMappings = {
   '\u697d\u5929': {
-    detectHeaders: ['\u6ce8\u6587\u756a\u53f7', '\u5546\u54c1\u756a\u53f7'],
+    detectHeaders: ['\u6ce8\u6587\u756a\u53f7'],
     orderNo: ['\u6ce8\u6587\u756a\u53f7'],
+    customerLast: ['\u6ce8\u6587\u8005\u540d\u5b57'],
+    customerFirst: ['\u6ce8\u6587\u8005\u540d\u524d'],
     customer: ['\u9001\u4ed8\u5148\u6c0f\u540d'],
     postal: ['\u9001\u4ed8\u5148\u90f5\u4fbf\u756a\u53f7'],
+    addressPref: ['\u9001\u4ed8\u5148\u4f4f\u6240\uff1a\u90fd\u9053\u5e9c\u770c'],
+    addressCity: ['\u9001\u4ed8\u5148\u4f4f\u6240\uff1a\u90fd\u5e02\u533a'],
+    addressStreet: ['\u9001\u4ed8\u5148\u4f4f\u6240\uff1a\u753a\u4ee5\u964d'],
     address: ['\u9001\u4ed8\u5148\u4f4f\u6240'],
-    sku: ['\u5546\u54c1\u756a\u53f7'],
+    sku: ['\u5546\u54c1\u756a\u53f7', '\u5546\u54c1\u7ba1\u7406\u756a\u53f7', '\u5546\u54c1\u540d'],
     quantity: ['\u500b\u6570'],
   },
   Amazon: {
-    detectHeaders: ['order-id', 'ship-address-1'],
+    detectHeaders: ['order-id', 'quantity-purchased'],
     orderNo: ['order-id'],
-    customer: ['recipient-name'],
+    customer: ['buyer-email', 'recipient-name'],
     postal: ['ship-postal-code'],
-    address: ['ship-address-1'],
+    addressPref: ['ship-state'],
+    addressCity: ['ship-city'],
+    addressStreet: ['ship-address-1'],
     sku: ['sku'],
     quantity: ['quantity-purchased'],
   },
@@ -233,8 +261,32 @@ const platformFieldMappings = {
 function getPlatformMissingHeaders(headers, platform) {
   const mapping = platformFieldMappings[platform];
   if (!mapping) return [];
-  return ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity']
-    .flatMap((field) => mapping[field] || [])
+  if (platform === '\u697d\u5929') {
+    const missing = [];
+    if (!hasAnyHeader(headers, mapping.orderNo || [])) missing.push(...(mapping.orderNo || []));
+    if ((!hasHeaders(headers, mapping.customerLast || []) || !hasHeaders(headers, mapping.customerFirst || [])) && !hasHeaders(headers, mapping.customer || [])) {
+      missing.push(...(mapping.customerLast || []), ...(mapping.customerFirst || []));
+    }
+    if (!hasHeaders(headers, mapping.address || []) && !hasHeaders(headers, [...(mapping.addressPref || []), ...(mapping.addressCity || []), ...(mapping.addressStreet || [])])) {
+      missing.push(...(mapping.addressPref || []), ...(mapping.addressCity || []), ...(mapping.addressStreet || []));
+    }
+    if (!hasAnyHeader(headers, mapping.sku || [])) missing.push(...(mapping.sku || []));
+    if (!hasAnyHeader(headers, mapping.quantity || [])) missing.push(...(mapping.quantity || []));
+    return [...new Set(missing.filter((header) => !headers.includes(header)))];
+  }
+  if (platform === 'Amazon') {
+    const missing = [];
+    if (!hasAnyHeader(headers, mapping.orderNo || [])) missing.push(...(mapping.orderNo || []));
+    if (!hasAnyHeader(headers, mapping.customer || [])) missing.push(...(mapping.customer || []));
+    if (!hasHeaders(headers, [...(mapping.addressPref || []), ...(mapping.addressCity || [])])) {
+      missing.push(...(mapping.addressPref || []), ...(mapping.addressCity || []));
+    }
+    if (!hasAnyHeader(headers, mapping.sku || [])) missing.push(...(mapping.sku || []));
+    if (!hasAnyHeader(headers, mapping.quantity || [])) missing.push(...(mapping.quantity || []));
+    return [...new Set(missing.filter((header) => !headers.includes(header)))];
+  }
+  return ['orderNo', 'customer', 'address', 'sku', 'quantity']
+    .flatMap((field) => hasAnyHeader(headers, mapping[field] || []) ? [] : (mapping[field] || []))
     .filter((header) => !headers.includes(header));
 }
 function firstValue(row, fields) {
@@ -247,34 +299,58 @@ function joinedValue(row, fields) {
 
 function normalizePlatformOrderRow(row, platform) {
   const mapping = platformFieldMappings[platform];
+  const customer = platform === '\u697d\u5929'
+    ? compactText(`${firstValue(row, mapping?.customerLast || [])}${firstValue(row, mapping?.customerFirst || [])}`) || firstValue(row, mapping?.customer || [])
+    : firstValue(row, mapping?.customer || []);
+  const address = platform === 'Amazon'
+    ? normalizeJapaneseAddress([
+      firstValue(row, mapping?.addressPref || []),
+      firstValue(row, mapping?.addressCity || []),
+      firstValue(row, mapping?.addressStreet || []),
+    ])
+    : normalizeJapaneseAddress([
+      firstValue(row, mapping?.addressPref || []),
+      firstValue(row, mapping?.addressCity || []),
+      firstValue(row, mapping?.addressStreet || []),
+    ]) || joinedValue(row, mapping?.address || []);
+  const rawSku = firstValue(row, mapping?.sku || []);
+  const postal = normalizePostal(firstValue(row, mapping?.postal || []));
+  const warnings = [];
+  if (!postal) warnings.push('\u90f5\u4fbf\u756a\u53f7\u672a\u8a2d\u5b9a');
+  if (platform === '\u697d\u5929' && rawSku === firstValue(row, ['\u5546\u54c1\u540d']) && rawSku) {
+    warnings.push('\u5546\u54c1SKU\u304c\u5546\u54c1\u540d\u304b\u3089\u4ee3\u7528\u3055\u308c\u3066\u3044\u307e\u3059');
+  }
   return {
     id: makeId('o'),
     orderNo: firstValue(row, mapping?.orderNo || []),
-    customer: firstValue(row, mapping?.customer || []),
-    postal: firstValue(row, mapping?.postal || []),
-    address: joinedValue(row, mapping?.address || []),
-    sku: firstValue(row, mapping?.sku || []),
+    customer,
+    postal,
+    address,
+    sku: rawSku,
     quantity: String(Math.max(1, toNumber(firstValue(row, mapping?.quantity || [])) || 1)),
     sourcePlatform: platform,
+    warnings,
   };
 }
 function hasStandardOrderFields(order) {
-  return ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'].every((field) => normalize(order[field]));
+  return ['orderNo', 'customer', 'address', 'sku', 'quantity'].every((field) => normalize(order[field]));
 }
 function importOrderCsvRows(rows) {
   const headers = Object.keys(rows[0] || {});
   const platform = detectOrderCsvFormat(headers);
-  if (!platform) return { platform: '', orders: [], successCount: 0, failureCount: rows.length, missingHeaders: [] };
+  if (!platform) return { platform: '', orders: [], successCount: 0, failureCount: rows.length, missingHeaders: [], warningCount: 0 };
   const missingHeaders = getPlatformMissingHeaders(headers, platform);
-  if (missingHeaders.length) return { platform, orders: [], successCount: 0, failureCount: rows.length, missingHeaders };
+  if (missingHeaders.length) return { platform, orders: [], successCount: 0, failureCount: rows.length, missingHeaders, warningCount: 0 };
   const orders = rows.map((row) => normalizePlatformOrderRow(row, platform));
   const validOrders = orders.filter(hasStandardOrderFields);
+  const warningCount = validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0);
   return {
     platform,
     orders: validOrders,
     successCount: validOrders.length,
     failureCount: orders.length - validOrders.length,
     missingHeaders: [],
+    warningCount,
   };
 }
 
@@ -295,11 +371,12 @@ function normalizeOrder(row) {
     id: makeId('o'),
     orderNo: normalize(row.orderNo),
     customer: normalize(row.customer),
-    postal: normalize(row.postal),
-    address: normalize(row.address),
+    postal: normalizePostal(row.postal),
+    address: compactText(row.address),
     sku: normalize(row.sku),
     quantity: String(Math.max(1, toNumber(row.quantity) || 1)),
     sourcePlatform: normalize(row.sourcePlatform) || 'ShipNavi',
+    warnings: Array.isArray(row.warnings) ? row.warnings : (!normalizePostal(row.postal) ? ['\u90f5\u4fbf\u756a\u53f7\u672a\u8a2d\u5b9a'] : []),
   };
 }
 
@@ -328,6 +405,26 @@ function normalizeFare(row) {
   };
 }
 
+function isMatrixFareTable(headers) {
+  const firstHeader = normalizeHeader(headers[0]);
+  return ['size', 'サイズ', '総長'].includes(firstHeader);
+}
+
+function convertMatrixFareRows(rows, carrierName = 'ヤマト', serviceName = '宅急便') {
+  if (!rows.length) return [];
+  const headers = Object.keys(rows[0] || {}).map((header) => normalizeHeader(header));
+  const sizeHeader = headers[0];
+  const weightHeader = headers.find((header) => ['weight', '重量'].includes(header));
+  const zoneHeaders = headers.filter((header) => header !== sizeHeader && header !== weightHeader);
+  return rows.flatMap((row) => zoneHeaders.map((zone) => normalizeFare({
+    carrier: carrierName,
+    service: serviceName,
+    size: row[sizeHeader],
+    zone,
+    fare: row[zone],
+  }))).filter((fare) => fare.size && fare.zone && toNumber(fare.fare) > 0);
+}
+
 function getProductsBySku() {
   return Object.fromEntries(getData('products').map((product) => [product.sku, product]));
 }
@@ -351,7 +448,13 @@ function getDataHealth() {
   };
 }
 
-function getZoneByPostal(postal) {
+function getZoneByPostal(postal, address = '') {
+  const normalizedAddress = compactText(address);
+  if (normalizedAddress.includes('東京都')) return '東京';
+  if (['神奈川県', '埼玉県', '千葉県', '茨城県', '栃木県', '群馬県', '山梨県'].some((name) => normalizedAddress.includes(name))) return '関東';
+  if (['大阪府', '京都府', '兵庫県', '奈良県', '滋賀県', '和歌山県'].some((name) => normalizedAddress.includes(name))) return '関西';
+  if (normalizedAddress.includes('北海道')) return '北海道';
+  if (normalizedAddress.includes('沖縄県')) return '沖縄';
   return 'default';
 }
 
@@ -445,11 +548,12 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
 
   const isBundled = orders.length > 1;
   const estimatedSize = missingProduct ? null : (isBundled ? estimateBundledSize(totalVolume, largestItemSize) : largestItemSize);
-  const zone = getZoneByPostal(orders[0]?.postal);
+  const zone = getZoneByPostal(orders[0]?.postal, orders[0]?.address);
   const fareOptions = missingProduct ? [] : getFareOptions(estimatedSize, zone);
   const best = fareOptions[0] || null;
   const second = fareOptions[1] || null;
-  const status = missingProduct ? '商品未登録' : (best ? '' : '対応運賃なし');
+  const warningTexts = [...new Set(orders.flatMap((order) => order.warnings || []))];
+  const status = missingProduct ? '商品未登録' : (best ? warningTexts.join(' / ') : '対応運賃なし');
 
   return {
     shipmentGroupId: `SG-${String(index + 1).padStart(3, '0')}`,
@@ -621,9 +725,18 @@ function initCarriers() {
     if (!file) return showToast('運賃表CSVを選択してください。');
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
-      const missing = requireColumns(rows, ['carrier', 'service', 'size', 'zone', 'fare']);
-      if (missing.length) return showToast(`不足字段: ${missing.join(', ')}`);
-      const imported = rows.map(normalizeFare).filter((fare) => supportedCarriers.includes(fare.carrier));
+      const headers = Object.keys(rows[0] || {});
+      const carrierName = normalizeCarrier(form?.elements?.name?.value || form?.elements?.carrier?.value || 'ヤマト');
+      const serviceName = normalize(form?.elements?.service?.value || '宅急便');
+      let imported = [];
+      if (hasHeaders(headers, ['carrier', 'service', 'size', 'zone', 'fare'])) {
+        imported = rows.map(normalizeFare).filter((fare) => supportedCarriers.includes(fare.carrier));
+      } else if (isMatrixFareTable(headers)) {
+        imported = convertMatrixFareRows(rows, carrierName, serviceName);
+      } else {
+        const missing = requireColumns(rows, ['carrier', 'service', 'size', 'zone', 'fare']);
+        return showToast(`不足字段: ${missing.join(', ')}`);
+      }
       setData('fareTables', imported);
       setData('carriers', imported);
       renderCarriers(search?.value || '');
@@ -640,7 +753,7 @@ function renderOrders(filter = '') {
   const orders = getData('orders').filter((order) => `${order.orderNo} ${order.customer} ${order.sku}`.toLowerCase().includes(keyword));
   tbody.innerHTML = orders.map((order) => `
     <tr>
-      <td>${escapeHtml(order.orderNo)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.postal)}</td>
+      <td>${escapeHtml(order.orderNo)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.postal || '郵便番号未設定')}</td>
       <td>${escapeHtml(order.sku)} x ${escapeHtml(order.quantity)}</td><td>${escapeHtml(order.address)}</td><td>${bundleIds.has(order.id) ? '同梱候補' : '単独'}</td>
       <td><span class="badge ${bundleIds.has(order.id) ? 'green' : 'orange'}">${bundleIds.has(order.id) ? '可同梱' : '確認済'}</span></td>
     </tr>
@@ -677,6 +790,7 @@ function initOrders() {
           successCount: validOrders.length,
           failureCount: orders.length - validOrders.length,
           missingHeaders: [],
+          warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
         };
       }
       if (!importResult) return showToast('未対応CSV形式');
@@ -684,7 +798,7 @@ function initOrders() {
       setData('orders', imported);
       renderOrders(search?.value || '');
       const summary = document.querySelector('#order-preview-summary');
-      const message = `${importResult.platform} CSVを取り込みました / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount}`;
+      const message = `${importResult.platform} CSVを取り込みました / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0}`;
       if (summary) summary.textContent = message;
       showToast(message);
     });
@@ -727,7 +841,7 @@ function renderResults() {
         <td>${escapeHtml(row.orderNos)}</td>
         <td>${escapeHtml(row.customer)}</td>
         <td>${escapeHtml(row.sourcePlatform || '-')}</td>
-        <td>${escapeHtml(row.postal)}</td>
+        <td>${escapeHtml(row.postal || '郵便番号未設定')}</td>
         <td>${escapeHtml(row.address)}</td>
         <td>${escapeHtml(row.items)}</td>
         <td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td>
@@ -756,7 +870,7 @@ function renderResults() {
     </section>
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>同梱結果</h2></div>
-      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.sourcePlatform || '-')}</td><td>${escapeHtml(row.postal)}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="11">注文データがありません。</td></tr>'}</tbody></table></div>
+      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.sourcePlatform || '-')}</td><td>${escapeHtml(row.postal || '郵便番号未設定')}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="11">注文データがありません。</td></tr>'}</tbody></table></div>
     </section>
   `;
   document.querySelector('#export-results-csv')?.addEventListener('click', () => {
