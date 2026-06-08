@@ -187,6 +187,10 @@ function isImageFile(file) {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file?.name || '');
 }
 
+function isExcelFile(file) {
+  return /\.(xlsx|xls)$/i.test(file?.name || '');
+}
+
 function normalizeMatrixView(view) {
   if (!view || typeof view !== 'object') return null;
   const zoneHeaders = Array.isArray(view.zoneHeaders) ? view.zoneHeaders.map((zone) => compactText(zone)).filter(Boolean) : [];
@@ -522,6 +526,114 @@ function normalizeOrder(row) {
   };
 }
 
+const productFieldCandidates = {
+  sku: ['sku', 'SKU', '商品番号', '商品コード', '商品管理番号', '品番', '商品ID', '型番'],
+  name: ['name', '商品名', '商品名称', 'product-name', 'Product Name', '品名'],
+  size: ['size', 'サイズ', '配送サイズ', '三辺合計', '総長', '梱包サイズ'],
+  weight: ['weight', '重量', '重量(g)', '重量kg', '商品重量', '梱包重量'],
+  length: ['length', '長さ', '縦', '奥行', '梱包長さ'],
+  width: ['width', '幅', '横', '梱包幅'],
+  height: ['height', '高さ', '厚さ', '梱包高さ'],
+  bundleable: ['bundleable', '同梱可', '同梱', '同梱区分'],
+};
+
+function parseProductWeight(header, value) {
+  const normalizedValue = normalize(value);
+  if (!normalizedValue) return '';
+  const normalizedHeader = normalizeHeader(header);
+  const numeric = toNumber(normalizedValue);
+  if (!numeric) return '';
+  if (normalizedHeader.includes('kg') && !normalizedHeader.includes('(g)')) return String(Math.round(numeric * 1000));
+  return String(numeric);
+}
+
+function detectProductFieldMapping(headers) {
+  return Object.fromEntries(Object.entries(productFieldCandidates).map(([field, candidates]) => [
+    field,
+    candidates.find((candidate) => hasAnyHeader(headers, [candidate])) || '',
+  ]));
+}
+
+function detectProductImportCapability(headers, mapping) {
+  const identifiedFieldCount = Object.values(mapping).filter(Boolean).length;
+  const hasIdentity = Boolean(mapping.sku || mapping.name);
+  return {
+    identifiedFieldCount,
+    hasIdentity,
+    recognized: identifiedFieldCount > 0,
+  };
+}
+
+function normalizeProductImportRow(row, mapping) {
+  const name = compactText(resolveField(row, mapping.name ? [mapping.name] : []));
+  let sku = compactText(resolveField(row, mapping.sku ? [mapping.sku] : []));
+  const rawSize = normalizeSize(resolveField(row, mapping.size ? [mapping.size] : []));
+  const length = String(toNumber(resolveField(row, mapping.length ? [mapping.length] : [])));
+  const width = String(toNumber(resolveField(row, mapping.width ? [mapping.width] : [])));
+  const height = String(toNumber(resolveField(row, mapping.height ? [mapping.height] : [])));
+  const computedSize = rawSize || sizeFromTotal(toNumber(length) + toNumber(width) + toNumber(height)) || '';
+  const rawWeightField = mapping.weight || '';
+  const weight = parseProductWeight(rawWeightField, resolveField(row, rawWeightField ? [rawWeightField] : []));
+  const warnings = [];
+  if (!sku && name) {
+    sku = name;
+    warnings.push('商品名をSKUとして使用');
+  }
+  if (!weight) warnings.push('重量未設定');
+
+  return {
+    id: makeId('p'),
+    sku,
+    name,
+    size: computedSize ? String(computedSize) : '',
+    weight,
+    length,
+    width,
+    height,
+    bundleable: mapping.bundleable ? !['false', '0', 'no', 'n', '不可'].includes(normalize(resolveField(row, [mapping.bundleable])).toLowerCase()) : true,
+    warnings,
+  };
+}
+
+function importProductCsvRows(rows) {
+  const headers = Object.keys(rows[0] || {});
+  const mapping = detectProductFieldMapping(headers);
+  const capability = detectProductImportCapability(headers, mapping);
+  if (!capability.recognized) {
+    return {
+      products: [],
+      successCount: 0,
+      failureCount: rows.length,
+      warningCount: 0,
+      warningDetails: [],
+      message: '商品CSVとして認識できません',
+    };
+  }
+  if (!capability.hasIdentity) {
+    return {
+      products: [],
+      successCount: 0,
+      failureCount: rows.length,
+      warningCount: 0,
+      warningDetails: [],
+      message: '必要な商品識別項目が見つかりません',
+    };
+  }
+  const normalizedProducts = rows.map((row) => normalizeProductImportRow(row, mapping));
+  const validProducts = normalizedProducts
+    .filter((product) => normalize(product.sku) || normalize(product.name))
+    .map((product) => ({ ...normalizeProduct(product), warnings: product.warnings || [] }));
+  const warningDetails = [...new Set(validProducts.flatMap((product) => product.warnings || []))];
+  return {
+    products: validProducts,
+    successCount: validProducts.length,
+    failureCount: normalizedProducts.length - validProducts.length,
+    warningCount: validProducts.reduce((sum, product) => sum + (product.warnings?.length || 0), 0),
+    warningDetails,
+    message: '',
+  };
+}
+
 function normalizeProduct(row) {
   return {
     id: row.id || makeId('p'),
@@ -804,6 +916,18 @@ function renderProducts(filter = '') {
   `).join('') || '<tr><td colspan="6">商品データがありません。</td></tr>';
 }
 
+function setProductImportSummary(message) {
+  const form = document.querySelector('#product-import-form');
+  if (!form) return;
+  let summary = document.querySelector('#product-import-summary');
+  if (!summary) {
+    summary = document.createElement('p');
+    summary.id = 'product-import-summary';
+    form.insertAdjacentElement('afterend', summary);
+  }
+  summary.textContent = message;
+}
+
 function initProducts() {
   const form = document.querySelector('#product-form');
   if (!form) return;
@@ -837,14 +961,30 @@ function initProducts() {
     event.preventDefault();
     const file = event.currentTarget.elements.file.files[0];
     if (!file) return showToast('商品CSVを選択してください。');
+    if (isExcelFile(file)) {
+      const message = 'Excel形式は現在CSV変換が必要です。CSVで保存してからアップロードしてください。';
+      setProductImportSummary(message);
+      return showToast(message);
+    }
+    if (isImageFile(file)) {
+      const message = '画像OCRには対応していません。CSVまたはExcelをアップロードしてください。';
+      setProductImportSummary(message);
+      return showToast(message);
+    }
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
-      const missing = requireColumns(rows, ['sku', 'name', 'size', 'weight', 'length', 'width', 'height', 'bundleable']);
-      if (missing.length) return showToast(`不足字段: ${missing.join(', ')}`);
-      const imported = rows.map(normalizeProduct).filter((product) => product.sku);
+      const importResult = importProductCsvRows(rows);
+      if (importResult.message) {
+        setProductImportSummary(importResult.message);
+        return showToast(importResult.message);
+      }
+      const imported = importResult.products;
       setData('products', [...imported, ...getData('products')]);
       renderProducts(search?.value || '');
-      showToast(`${imported.length}件の商品主档を保存しました。`);
+      const warningText = (importResult.warningDetails || []).join('、') || 'なし';
+      const message = `商品数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount} / 警告内容: ${warningText}`;
+      setProductImportSummary(message);
+      showToast(message);
     });
   });
 }
