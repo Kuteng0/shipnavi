@@ -30,7 +30,7 @@ const emptyData = {
   products: [],
   carriers: [],
   orders: [],
-  fareTables: [],
+  fareTables: { matrixView: null, normalizedFareRows: [] },
   templates: [],
   templateMappings: [],
   resultSnapshots: [],
@@ -181,6 +181,49 @@ function normalizePostal(value) {
 
 function normalizeJapaneseAddress(parts) {
   return parts.map((part) => compactText(part)).filter(Boolean).join('');
+}
+
+function isImageFile(file) {
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file?.name || '');
+}
+
+function normalizeMatrixView(view) {
+  if (!view || typeof view !== 'object') return null;
+  const zoneHeaders = Array.isArray(view.zoneHeaders) ? view.zoneHeaders.map((zone) => compactText(zone)).filter(Boolean) : [];
+  return {
+    carrier: normalizeCarrier(view.carrier || 'ヤマト'),
+    service: normalize(view.service || '宅急便'),
+    sizeLabel: compactText(view.sizeLabel || 'サイズ') || 'サイズ',
+    weightLabel: compactText(view.weightLabel || '重量') || '重量',
+    zoneHeaders,
+    rows: Array.isArray(view.rows) ? view.rows.map((row) => ({
+      size: normalizeSize(row?.size),
+      weight: normalize(row?.weight) ? String(toNumber(row?.weight)) : '',
+      fares: Object.fromEntries(zoneHeaders.map((zone) => [zone, normalize(row?.fares?.[zone]) ? String(toNumber(row?.fares?.[zone])) : ''])),
+    })).filter((row) => row.size || row.weight || Object.values(row.fares).some((fare) => toNumber(fare) > 0)) : [],
+  };
+}
+
+function normalizeFareTableState(raw) {
+  if (Array.isArray(raw)) {
+    return { matrixView: null, normalizedFareRows: raw.map(normalizeFare).filter((fare) => fare.size && toNumber(fare.fare) > 0) };
+  }
+  if (raw && typeof raw === 'object') {
+    const matrixView = normalizeMatrixView(raw.matrixView);
+    const normalizedFareRows = Array.isArray(raw.normalizedFareRows) && raw.normalizedFareRows.length
+      ? raw.normalizedFareRows.map(normalizeFare).filter((fare) => fare.size && toNumber(fare.fare) > 0)
+      : (matrixView ? normalizeFareMatrix(matrixView) : []);
+    return { matrixView, normalizedFareRows };
+  }
+  return { matrixView: null, normalizedFareRows: [] };
+}
+
+function getFareTableState() {
+  return normalizeFareTableState(getData('fareTables'));
+}
+
+function setFareTableState(matrixView, normalizedFareRows) {
+  setData('fareTables', normalizeFareTableState({ matrixView, normalizedFareRows }));
 }
 
 function requireColumns(rows, columns) {
@@ -505,6 +548,26 @@ function normalizeFare(row) {
   };
 }
 
+function createMatrixView(rows, carrierName = 'ヤマト', serviceName = '宅急便') {
+  if (!rows.length) return null;
+  const headers = Object.keys(rows[0] || {}).map((header) => normalizeHeader(header));
+  const sizeHeader = headers[0];
+  const weightHeader = headers.find((header) => ['weight', '重量', '重量(kg)'].includes(header));
+  const zoneHeaders = headers.filter((header) => header !== sizeHeader && header !== weightHeader);
+  return normalizeMatrixView({
+    carrier: carrierName,
+    service: serviceName,
+    sizeLabel: ['size'].includes(sizeHeader) ? 'サイズ' : sizeHeader,
+    weightLabel: weightHeader || '重量',
+    zoneHeaders,
+    rows: rows.map((row) => ({
+      size: row[sizeHeader],
+      weight: weightHeader ? row[weightHeader] : '',
+      fares: Object.fromEntries(zoneHeaders.map((zone) => [zone, row[zone] || ''])),
+    })),
+  });
+}
+
 function detectFareTableFormat(headers, rows) {
   const normalizedHeaders = headers.map((header) => normalizeHeader(header));
   if (hasHeaders(normalizedHeaders, ['carrier', 'service', 'size', 'zone', 'fare'])) return 'vertical';
@@ -514,19 +577,16 @@ function detectFareTableFormat(headers, rows) {
   return 'unknown';
 }
 
-function normalizeFareMatrix(rows, carrierName = 'ヤマト', serviceName = '宅急便') {
-  if (!rows.length) return [];
-  const headers = Object.keys(rows[0] || {}).map((header) => normalizeHeader(header));
-  const sizeHeader = headers[0];
-  const weightHeader = headers.find((header) => ['weight', '重量', '重量(kg)'].includes(header));
-  const zoneHeaders = headers.filter((header) => header !== sizeHeader && header !== weightHeader);
-  return rows.flatMap((row) => zoneHeaders.map((zone) => normalizeFare({
-    carrier: carrierName,
-    service: serviceName,
-    size: row[sizeHeader],
-    weightLimit: weightHeader ? row[weightHeader] : '',
+function normalizeFareMatrix(matrixInput, carrierName = 'ヤマト', serviceName = '宅急便') {
+  const matrixView = Array.isArray(matrixInput) ? createMatrixView(matrixInput, carrierName, serviceName) : normalizeMatrixView(matrixInput);
+  if (!matrixView?.rows?.length) return [];
+  return matrixView.rows.flatMap((row) => matrixView.zoneHeaders.map((zone) => normalizeFare({
+    carrier: matrixView.carrier,
+    service: matrixView.service,
+    size: row.size,
+    weightLimit: row.weight,
     zone,
-    fare: row[zone],
+    fare: row.fares?.[zone],
   }))).filter((fare) => fare.size && fare.zone && toNumber(fare.fare) > 0);
 }
 
@@ -535,7 +595,7 @@ function getProductsBySku() {
 }
 
 function getFareRows() {
-  return getData('fareTables');
+  return getFareTableState().normalizedFareRows;
 }
 
 function getDataHealth() {
@@ -793,7 +853,43 @@ function renderCarriers(filter = '') {
   const tbody = document.querySelector('#carriers-table');
   if (!tbody) return;
   const keyword = filter.toLowerCase();
-  const fares = getFareRows().filter((fare) => `${fare.carrier} ${fare.service} ${fare.size} ${fare.zone}`.toLowerCase().includes(keyword));
+  const fareState = getFareTableState();
+  if (fareState.matrixView?.rows?.length) {
+    const matrix = fareState.matrixView;
+    const matchesFilter = !keyword || `${matrix.carrier} ${matrix.service} ${matrix.zoneHeaders.join(' ')}`.toLowerCase().includes(keyword);
+    if (!matchesFilter) {
+      tbody.innerHTML = '<tr><td colspan="6">該当する運賃表がありません。</td></tr>';
+      return;
+    }
+    const zoneHeaderCells = matrix.zoneHeaders.map((zone) => `<th>${escapeHtml(zone)}</th>`).join('');
+    const matrixRows = matrix.rows.map((row, rowIndex) => `
+      <tr>
+        <td><input data-matrix-size="${rowIndex}" value="${escapeHtml(row.size)}" /></td>
+        <td><input data-matrix-weight="${rowIndex}" value="${escapeHtml(row.weight)}" /></td>
+        ${matrix.zoneHeaders.map((zone, zoneIndex) => `<td><input data-matrix-fare="${rowIndex}" data-zone-index="${zoneIndex}" value="${escapeHtml(row.fares?.[zone] || '')}" /></td>`).join('')}
+      </tr>
+    `).join('');
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6">
+          <div class="table-toolbar">
+            <strong>${escapeHtml(matrix.carrier)} / ${escapeHtml(matrix.service)}</strong>
+            <div class="row-actions">
+              <button class="small-button" type="button" data-save-fare-matrix="true">保存</button>
+            </div>
+          </div>
+          <div class="responsive-table">
+            <table>
+              <thead><tr><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${zoneHeaderCells}</tr></thead>
+              <tbody>${matrixRows}</tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  const fares = fareState.normalizedFareRows.filter((fare) => `${fare.carrier} ${fare.service} ${fare.size} ${fare.zone}`.toLowerCase().includes(keyword));
   tbody.innerHTML = fares.map((fare) => `
     <tr>
       <td>${escapeHtml(fare.carrier)}</td><td>${escapeHtml(fare.service)}</td><td>${formatYen(fare.fare)}</td>
@@ -813,38 +909,59 @@ function initCarriers() {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
     const fare = normalizeFare({ carrier: data.name || data.carrier, service: data.service, size: data.sizes || data.size, zone: 'default', fare: data.baseFare || data.fare });
-    setData('fareTables', [{ ...fare, id: data.id || makeId('rate') }, ...getFareRows()]);
+    setFareTableState(null, [{ ...fare, id: data.id || makeId('rate') }, ...getFareRows()]);
     form.reset();
     renderCarriers(search?.value || '');
     showToast('運賃表を保存しました。');
   });
   document.addEventListener('click', (event) => {
     const deleteId = event.target.dataset?.deleteFare;
-    if (!deleteId) return;
-    setData('fareTables', getFareRows().filter((fare) => fare.id !== deleteId));
+    if (deleteId) {
+      setFareTableState(null, getFareRows().filter((fare) => fare.id !== deleteId));
+      renderCarriers(search?.value || '');
+      showToast('運賃行を削除しました。');
+      return;
+    }
+    if (event.target.dataset?.saveFareMatrix !== 'true') return;
+    const currentMatrix = getFareTableState().matrixView;
+    if (!currentMatrix) return;
+    const nextMatrix = normalizeMatrixView({
+      ...currentMatrix,
+      rows: currentMatrix.rows.map((row, rowIndex) => ({
+        size: document.querySelector(`[data-matrix-size="${rowIndex}"]`)?.value || '',
+        weight: document.querySelector(`[data-matrix-weight="${rowIndex}"]`)?.value || '',
+        fares: Object.fromEntries(currentMatrix.zoneHeaders.map((zone, zoneIndex) => [zone, document.querySelector(`[data-matrix-fare="${rowIndex}"][data-zone-index="${zoneIndex}"]`)?.value || ''])),
+      })),
+    });
+    const normalizedFareRows = normalizeFareMatrix(nextMatrix);
+    setFareTableState(nextMatrix, normalizedFareRows);
+    setData('carriers', normalizedFareRows);
     renderCarriers(search?.value || '');
-    showToast('運賃行を削除しました。');
+    showToast('矩陣運賃表を保存しました。');
   });
   document.querySelector('#fare-import-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const file = event.currentTarget.elements.file.files[0];
     if (!file) return showToast('運賃表CSVを選択してください。');
+    if (isImageFile(file)) return showToast('画像OCRには対応していません。CSVまたはExcelをアップロードしてください。');
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
       const headers = Object.keys(rows[0] || {});
       const carrierName = normalizeCarrier(form?.elements?.name?.value || form?.elements?.carrier?.value || 'ヤマト');
       const serviceName = normalize(form?.elements?.service?.value || '宅急便');
       let imported = [];
+      let matrixView = null;
       const fareFormat = detectFareTableFormat(headers, rows);
       if (fareFormat === 'vertical') {
         imported = rows.map(normalizeFare).filter((fare) => supportedCarriers.includes(fare.carrier));
       } else if (fareFormat === 'matrix') {
         imported = normalizeFareMatrix(rows, carrierName, serviceName);
+        matrixView = createMatrixView(rows, carrierName, serviceName);
       } else {
         const missing = requireColumns(rows, ['carrier', 'service', 'size', 'zone', 'fare']);
         return showToast(`不足字段: ${missing.join(', ')}`);
       }
-      setData('fareTables', imported);
+      setFareTableState(matrixView, imported);
       setData('carriers', imported);
       renderCarriers(search?.value || '');
       showToast(`${imported.length}行の運賃表を保存しました。`);
@@ -878,6 +995,7 @@ function initOrders() {
     event.preventDefault();
     const file = event.currentTarget.elements.file.files[0];
     if (!file) return showToast('\u6ce8\u6587CSV\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044\u3002');
+    if (isImageFile(file)) return showToast('画像OCRには対応していません。CSVまたはExcelをアップロードしてください。');
     readFileAsText(file, (text) => {
       const rows = parseCsv(text);
       const headers = Object.keys(rows[0] || {});
@@ -921,7 +1039,9 @@ function initOrders() {
   });
   document.querySelector('#order-excel-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    showToast('Phase 2 MVPはCSVのみ対応です。');
+    const file = event.currentTarget.elements.file?.files?.[0];
+    if (isImageFile(file)) return showToast('画像OCRには対応していません。CSVまたはExcelをアップロードしてください。');
+    showToast('Excel取り込みは次段階対応です。現時点ではCSVをご利用ください。');
   });
 }
 
