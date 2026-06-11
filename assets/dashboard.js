@@ -683,7 +683,7 @@ function estimateBundledSize(totalVolume, largestItemSize) {
 
 function isOrderBundleable(order, productsBySku = getProductsBySku()) {
   const product = productsBySku[order.sku];
-  return product ? product.bundleable !== false : true;
+  return product ? product.bundleable !== false : false;
 }
 
 function getBundleKey(order) {
