@@ -720,16 +720,34 @@ function getShipmentOrderGroups() {
   return Object.values(grouped);
 }
 
-function getFareOptions(size, zone = 'unknown') {
+function getFareOptions(size, zone = 'unknown', totalWeight = 0) {
   if (!getFareRows().length || !size) return [];
+  
   // 区域未识别时返回空列表
   if (zone === 'unknown') return [];
+  
+  const numericSize = toNumber(size);
+  const numericWeight = toNumber(totalWeight);
+  
   return getFareRows()
     .map(normalizeFare)
     .filter((fare) => supportedCarriers.includes(fare.carrier) && toNumber(fare.fare) > 0)
     .filter((fare) => fare.zone === zone || fare.zone === 'default')
-    .filter((fare) => toNumber(fare.size) === toNumber(size))
-    .sort((a, b) => toNumber(a.fare) - toNumber(b.fare));
+    // 尺寸向上匹配：选择大于等于需求尺寸的最小可用尺寸
+    .filter((fare) => {
+      const fareSize = toNumber(fare.size);
+      return fareSize >= numericSize && shippingSizes.includes(fareSize);
+    })
+    // 重量限制检查：weightLimit为空或0表示无限制，否则检查实际重量
+    .filter((fare) => {
+      const weightLimit = toNumber(fare.weightLimit);
+      return weightLimit === 0 || numericWeight <= weightLimit;
+    })
+    .sort((a, b) => {
+      // 优先按尺寸排序（较小的尺寸优先），然后按运费排序
+      const sizeDiff = toNumber(a.size) - toNumber(b.size);
+      return sizeDiff !== 0 ? sizeDiff : toNumber(a.fare) - toNumber(b.fare);
+    });
 }
 
 function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
@@ -755,7 +773,7 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
   const isBundled = orders.length > 1;
   const estimatedSize = missingProduct ? null : (isBundled ? estimateBundledSize(totalVolume, largestItemSize) : largestItemSize);
   const zone = getZoneByPostal(orders[0]?.postal, orders[0]?.address);
-  const fareOptions = missingProduct ? [] : getFareOptions(estimatedSize, zone);
+  const fareOptions = missingProduct ? [] : getFareOptions(estimatedSize, zone, totalWeight);
   const best = fareOptions[0] || null;
   const second = fareOptions[1] || null;
   const warningTexts = [...new Set(orders.flatMap((order) => order.warnings || []))];
