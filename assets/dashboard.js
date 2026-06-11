@@ -614,6 +614,42 @@ function getDataHealth() {
 }
 
 function getZoneByPostal(postal, address = '') {
+  // 邮编范围到都道府县的映射表（日本郵便番号的前3位）
+  const postalCodeRanges = [
+    { min: 100, max: 199, zone: '東京' },      // 東京都
+    { min: 200, max: 209, zone: '関東' },      // 神奈川県
+    { min: 210, max: 219, zone: '関東' },      // 神奈川県
+    { min: 220, max: 229, zone: '関東' },      // 神奈川県
+    { min: 230, max: 249, zone: '関東' },      // 神奈川県
+    { min: 250, max: 299, zone: '関東' },      // 神奈川県
+    { min: 310, max: 319, zone: '関東' },      // 茨城県
+    { min: 320, max: 329, zone: '関東' },      // 栃木県
+    { min: 330, max: 369, zone: '関東' },      // 埼玉県
+    { min: 370, max: 399, zone: '関東' },      // 群馬県
+    { min: 400, max: 409, zone: '関東' },      // 山梨県
+    { min: 500, max: 549, zone: '関西' },      // 大阪府・滋賀県・三重県
+    { min: 600, max: 619, zone: '関西' },      // 京都府
+    { min: 650, max: 679, zone: '関西' },      // 兵庫県
+    { min: 800, max: 829, zone: '九州' },      // 福岡県
+    { min: 830, max: 859, zone: '九州' },      // 福岡県・佐賀県
+    { min: 860, max: 899, zone: '九州' },      // 佐賀県・長崎県・熊本県・大分県・宮崎県
+    { min: 900, max: 909, zone: '沖縄' }       // 沖縄県のみ
+  ];
+  
+  // Step 1: 尝试从邮编提取前3位数字，按范围识别
+  const cleanPostal = normalize(postal).replace(/[-〒\s]/g, '');
+  if (cleanPostal.length >= 3 && /^\d{7}$/.test(cleanPostal)) {
+    const postalPrefix = parseInt(cleanPostal.slice(0, 3), 10);
+    for (const range of postalCodeRanges) {
+      if (postalPrefix >= range.min && postalPrefix <= range.max) {
+        return range.zone;
+      }
+    }
+    // 邮编格式正确（7位数字）但不在任何有效范围内，返回 unknown
+    return 'unknown';
+  }
+  
+  // Step 2: 地址文本作为 fallback
   const normalizedAddress = compactText(address);
   if (normalizedAddress.includes('東京都')) return '東京';
   if (['神奈川県', '埼玉県', '千葉県', '茨城県', '栃木県', '群馬県', '山梨県'].some((name) => normalizedAddress.includes(name))) return '関東';
@@ -621,7 +657,9 @@ function getZoneByPostal(postal, address = '') {
   if (normalizedAddress.includes('北海道')) return '北海道';
   if (normalizedAddress.includes('沖縄県')) return '沖縄';
   if (['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'].some((name) => normalizedAddress.includes(name))) return '九州';
-  return 'default';
+  
+  // Step 3: 识别失败返回 unknown
+  return 'unknown';
 }
 
 function sizeFromTotal(value) {
@@ -682,8 +720,10 @@ function getShipmentOrderGroups() {
   return Object.values(grouped);
 }
 
-function getFareOptions(size, zone = 'default') {
+function getFareOptions(size, zone = 'unknown') {
   if (!getFareRows().length || !size) return [];
+  // 区域未识别时返回空列表
+  if (zone === 'unknown') return [];
   return getFareRows()
     .map(normalizeFare)
     .filter((fare) => supportedCarriers.includes(fare.carrier) && toNumber(fare.fare) > 0)
@@ -719,7 +759,16 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
   const best = fareOptions[0] || null;
   const second = fareOptions[1] || null;
   const warningTexts = [...new Set(orders.flatMap((order) => order.warnings || []))];
-  const status = missingProduct ? '商品未登録' : (best ? warningTexts.join(' / ') : '対応運賃なし');
+  let status;
+  if (missingProduct) {
+    status = '商品未登録';
+  } else if (zone === 'unknown') {
+    status = '区域未識別';
+  } else if (best) {
+    status = warningTexts.join(' / ') || '';
+  } else {
+    status = '対応運賃なし';
+  }
 
   return {
     shipmentGroupId: `SG-${String(index + 1).padStart(3, '0')}`,
