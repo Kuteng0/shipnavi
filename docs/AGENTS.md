@@ -10,6 +10,27 @@ This document is the canonical governance guide for agents and reviewers working
 - Do not silently change fare calculation, fare option filtering, import normalization, postal zone detection, bundle eligibility, or shipment grouping.
 - If a business behavior change is requested, state the affected functions and validation plan before relying on the result.
 
+## Required Skills
+
+ShipNavi agents must use `.skills/00-master-agent.md` as the startup workflow.
+For broad planning, review, release, governance, or phase-transition tasks, read
+the following project skills before reporting or editing:
+
+1. `.skills/01-project-governance.md`
+2. `.skills/02-shipping-engine.md`
+3. `.skills/03-import-engine.md`
+4. `.skills/04-platform-adapters.md`
+5. `.skills/05-validation-engine.md`
+6. `.skills/06-japanese-ui.md`
+7. `.skills/07-mobile-admin.md`
+8. `.skills/08-real-data-testing.md`
+9. `.skills/09-data-migration.md`
+10. `.skills/10-project-memory.md`
+11. `.skills/11-ai-reviewer.md`
+12. `.skills/12-performance.md`
+13. `.skills/13-security.md`
+14. `.skills/14-release-manager.md`
+
 ## Fare-project governance scope
 
 Fare-related governance covers these runtime areas:

@@ -230,3 +230,32 @@ Every phase must preserve these review rules:
 - Do not silently modify fare calculation, import normalization, postal-zone detection, or bundle eligibility.
 - Run `node --check assets/dashboard.js` and `git diff --check` before finalizing changes.
 - Update `docs/IMPORT_SPEC.md`, `docs/ARCHITECTURE.md`, and `docs/TESTING.md` when import behavior or runtime architecture changes.
+
+## Revised Phase 8: Shipment Workflow MVP
+
+Goal: close the daily shipping operations loop after Phase7 order import by giving operators a shipment queue that shows what can ship, what needs review, and what is blocked by unresolved issues.
+
+Scope:
+
+- Add a shipment status model with `imported`, `pending`, `ready`, `shipped`, `on_hold`, and `error` states.
+- Add a shipment queue page for 出荷対象一覧.
+- Show order count, issue count, recommended shipping method, and current shipment status per shipment group.
+- Put shipments with unresolved order warnings or blocking recommendation issues into 保留 or エラー automatically.
+- Keep carrier APIs, tracking APIs, label APIs, multi-tenant behavior, and AI repair out of this phase.
+
+Acceptance criteria:
+
+- Operators can open 出荷キュー after order import and review shipment readiness.
+- Status labels are shown in Japanese: 取込済み, 確認待ち, 出荷準備中, 出荷済み, 保留, エラー.
+- Existing `getFareOptions`, `getZoneByPostal`, bundle eligibility, and shipment grouping behavior remain unchanged.
+- The validator covers status normalization and issue-linked queue behavior.
+
+### Revised Phase 8 shipment export module
+
+Shipment Export MVP extends the 出荷キュー page with CSV export and preview. It exports order-level shipment rows from the current shipment groups, excludes 保留 and エラー rows by default, and shows 出荷対象件数, 保留件数, エラー件数, and 配送会社別件数 before download.
+
+Out of scope remains Carrier API, Tracking, Label API, Multi-tenant, and AI Repair.
+
+### Revised Phase 8 shipment results center module
+
+Shipment Results Center MVP adds an operations summary to the existing 結果センター. It shows 総注文数, 出荷済み件数, 保留件数, エラー件数, carrier counts for ヤマト / 佐川 / 日本郵便, shipment status breakdown, and estimated savings indicators based only on existing fare recommendation data.

@@ -476,7 +476,74 @@ const orderPlatforms = [
   { slug: 'mercari-shops', expected: 'メルカリShops', pendingSupport: false },
 ];
 
+const documentedOrderPlatforms = ['ShipNavi標準', ...orderPlatforms.map((platform) => platform.expected)];
+const platformSpecKeys = ['requiredSignals', 'optionalSignals', 'orderNo', 'customer', 'postal', 'address', 'sku', 'productName', 'quantity'];
+const requiredPhase7OrderEdgeIds = [
+  'EDGE-SPLIT-ADDRESS',
+  'EDGE-COMBINED-ADDRESS',
+  'EDGE-ALT-RECIPIENT',
+  'EDGE-ALT-SKU',
+  'EDGE-MALFORMED-QUANTITY',
+  'EDGE-MISSING-POSTAL',
+];
+const phase7ExistingPlatformAliasPlatforms = new Set(['楽天', 'Yahooショッピング', 'Amazon', 'Shopify', 'BASE', 'STORES', 'メルカリShops']);
+
+function parsePlatformFieldSpecs() {
+  const specText = readText(path.join(repoRoot, 'docs', 'IMPORT_SPEC.md'));
+  const specs = {};
+  for (const platform of documentedOrderPlatforms) {
+    const escaped = platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`<!-- phase7-platform-spec:start ${escaped} -->([\\s\\S]*?)<!-- phase7-platform-spec:end ${escaped} -->`);
+    const match = specText.match(pattern);
+    if (!match) {
+      fail(`Phase7 platform field spec exists for ${platform}`, { platform, expected: 'documented table' });
+      continue;
+    }
+    specs[platform] = {};
+    match[1].split(/\r?\n/).forEach((line) => {
+      const row = line.trim();
+      if (!row.startsWith('| `')) return;
+      const cells = row.split('|').slice(1, -1).map((cell) => cell.trim());
+      const key = cells[0]?.replace(/^`|`$/g, '');
+      if (!platformSpecKeys.includes(key)) return;
+      specs[platform][key] = (cells[2] || '')
+        .split(';')
+        .map((item) => item.trim().replace(/^`|`$/g, ''))
+        .filter(Boolean);
+    });
+  }
+  return specs;
+}
+
+function runtimeCandidateLabels(mapping, key) {
+  if (key === 'requiredSignals' || key === 'optionalSignals') return mapping[key] || [];
+  return (mapping.fieldCandidates?.[key] || []).map((candidate) => {
+    if (typeof candidate === 'string') return candidate;
+    return (candidate.fields || []).join(' + ');
+  });
+}
+
+function validatePlatformFieldSpecs() {
+  const docsSpecs = parsePlatformFieldSpecs();
+  const runtimeMappings = run('JSON.parse(JSON.stringify(platformFieldMappings))');
+  for (const platform of documentedOrderPlatforms) {
+    const docsSpec = docsSpecs[platform];
+    const runtimeMapping = runtimeMappings[platform];
+    assertTruthy(`Phase7 platform mapping exists at runtime for ${platform}`, runtimeMapping, { platform, field: 'platformFieldMappings' });
+    if (!docsSpec || !runtimeMapping) continue;
+    for (const key of platformSpecKeys) {
+      assertEqual(`Phase7 ${platform} ${key} docs match runtime mapping`, JSON.stringify(docsSpec[key] || []), JSON.stringify(runtimeCandidateLabels(runtimeMapping, key)), {
+        platform,
+        field: key,
+        expected: runtimeCandidateLabels(runtimeMapping, key),
+        actual: docsSpec[key] || [],
+      });
+    }
+  }
+}
+
 async function validateOrderFixtures() {
+  validatePlatformFieldSpecs();
   for (const platform of orderPlatforms) {
     const dir = fixturePath('orders', platform.slug);
     const normalFile = path.join(dir, 'normal.csv');
@@ -500,6 +567,9 @@ async function validateOrderFixtures() {
       assertTruthy(`${platform.expected} normal.${normalCase.label} imports orders`, result.orders.length > 0, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, expected: 'orders.length > 0', actual: result.orders.length });
       const sourcePlatforms = [...new Set(result.orders.map((order) => order.sourcePlatform))];
       assertIncludes(`${platform.expected} normal.${normalCase.label} sourcePlatform is preserved`, sourcePlatforms, platform.expected, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'sourcePlatform' });
+      assertEqual(`${platform.expected} normal.${normalCase.label} preview detects platform`, result.preview?.detectedPlatform, platform.expected, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'preview.detectedPlatform' });
+      assertEqual(`${platform.expected} normal.${normalCase.label} preview row count`, result.preview?.rowCount, normalCase.rows.length, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'preview.rowCount' });
+      assertTruthy(`${platform.expected} normal.${normalCase.label} preview mapped fields are present`, (result.preview?.mappedFields || []).length >= 5, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'preview.mappedFields', actual: result.preview?.mappedFields });
     }
 
     const wholeEdgeRows = parseCsvFile(edgeFile);
@@ -546,9 +616,37 @@ async function validateOrderFixtures() {
         fail(`${platform.expected} edge ${edgeCase.label} header can be located`, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, expected: 'edge header line', actual: 'not found' });
         continue;
       }
+      requiredPhase7OrderEdgeIds.forEach((edgeId) => {
+        assertTruthy(`${platform.expected} edge.${edgeCase.label} includes ${edgeId}`, edgeCase.rows.some((row) => Object.values(row).includes(edgeId)), {
+          fixture: path.relative(repoRoot, edgeCase.file),
+          platform: platform.expected,
+          expected: edgeId,
+        });
+      });
       const edgeDetected = callFunction('detectOrderCsvFormat', [Object.keys(edgeCase.rows[0] || {})]);
       assertEqual(`${platform.expected} edge.${edgeCase.label} detects platform`, edgeDetected, platform.expected, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'headers' });
       const edgeResult = callFunction('importOrderCsvRows', [edgeCase.rows]);
+      assertEqual(`${platform.expected} edge.${edgeCase.label} preview detects platform`, edgeResult.preview?.detectedPlatform, platform.expected, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'preview.detectedPlatform' });
+      assertEqual(`${platform.expected} edge.${edgeCase.label} preview warning count matches result`, edgeResult.preview?.warningCount, edgeResult.warningCount, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'preview.warningCount' });
+      assertTruthy(`${platform.expected} edge.${edgeCase.label} preview includes mapped fields`, (edgeResult.preview?.mappedFields || []).length >= 5, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'preview.mappedFields', actual: edgeResult.preview?.mappedFields });
+      if (phase7ExistingPlatformAliasPlatforms.has(platform.expected)) {
+        const altRecipientOrder = edgeResult.allOrders.find((order) => order.orderNo === 'EDGE-ALT-RECIPIENT');
+        assertTruthy(`${platform.expected} edge.${edgeCase.label} alternate recipient alias is normalized`, altRecipientOrder?.customer === '代替テスト購入者', {
+          fixture: path.relative(repoRoot, edgeCase.file),
+          platform: platform.expected,
+          field: 'customer',
+          expected: '代替テスト購入者',
+          actual: altRecipientOrder?.customer,
+        });
+        const altSkuOrder = edgeResult.allOrders.find((order) => order.orderNo === 'EDGE-ALT-SKU');
+        assertTruthy(`${platform.expected} edge.${edgeCase.label} alternate SKU alias is normalized`, altSkuOrder?.sku === 'ALT-SKU-001', {
+          fixture: path.relative(repoRoot, edgeCase.file),
+          platform: platform.expected,
+          field: 'sku',
+          expected: 'ALT-SKU-001',
+          actual: altSkuOrder?.sku,
+        });
+      }
       if (edgeResult.warningCount > 0 || edgeResult.failureCount > 0 || edgeResult.missingHeaders?.length) {
         pass(`${platform.expected} edge.${edgeCase.label} produces warning or failure after header location`, {
           fixture: path.relative(repoRoot, edgeCase.file),
@@ -618,8 +716,41 @@ async function validateOrderFixtures() {
       resetImportIssues();
       callFunction('recordOrderImportIssues', [invalidQuantityResult, path.basename(edgeCase.file)]);
       assertIssueType(`${platform.expected} edge.${edgeCase.label} invalid quantity creates persistent issue`, getImportIssuesFromDashboard(), 'invalid_quantity', { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'quantity', expected: 'invalid_quantity issue' });
+
+      const customerHeaders = run(`(platformFieldMappings[${JSON.stringify(platform.expected)}].fieldCandidates.customer || []).flatMap((candidate) => fieldCandidate(candidate).fields)`);
+      const presentCustomerHeaders = customerHeaders.filter((header) => Object.prototype.hasOwnProperty.call(edgeCase.rows[0] || {}, vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx)));
+      const missingRecipientRows = edgeCase.rows.map((row, index) => {
+        if (index !== 0) return row;
+        const next = { ...row };
+        presentCustomerHeaders.forEach((header) => {
+          next[vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx)] = '';
+        });
+        return next;
+      });
+      const missingRecipientResult = callFunction('importOrderCsvRows', [missingRecipientRows]);
+      assertIncludes(`${platform.expected} edge.${edgeCase.label} missing recipient warning`, missingRecipientResult.warningDetails, '顧客名未設定', {
+        fixture: path.relative(repoRoot, edgeCase.file),
+        platform: platform.expected,
+        field: 'customer',
+        expected: '顧客名未設定',
+      });
+      resetImportIssues();
+      callFunction('recordOrderImportIssues', [missingRecipientResult, path.basename(edgeCase.file)]);
+      assertIssueType(`${platform.expected} edge.${edgeCase.label} missing recipient creates persistent issue`, getImportIssuesFromDashboard(), 'missing_recipient', { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'customer', expected: 'missing_recipient issue' });
     }
   }
+
+  const unsupportedRows = [{ '独自注文列': 'X-001', '独自顧客列': '匿名顧客', '備考': '独自形式' }];
+  const unsupportedResult = callFunction('importOrderCsvRows', [unsupportedRows]);
+  assertEqual('unsupported order format returns unknown platform', unsupportedResult.platform, 'unknown', { field: 'platform' });
+  assertIncludes('unsupported order format guidance includes detected headers', unsupportedResult.unsupportedGuidance?.detectedHeaders || [], '独自注文列', { field: 'unsupportedGuidance.detectedHeaders' });
+  assertIncludes('unsupported order format guidance includes missing order number concept', unsupportedResult.unsupportedGuidance?.missingConcepts || [], '注文番号', { field: 'unsupportedGuidance.missingConcepts' });
+  assertIncludes('unsupported order format guidance includes Japanese next step', unsupportedResult.unsupportedGuidance?.nextSteps || [], 'ShipNavi標準テンプレートに合わせて列名を変更してください。', { field: 'unsupportedGuidance.nextSteps' });
+  const unsupportedMessage = callFunction('formatUnsupportedOrderFormatGuidance', [unsupportedResult.unsupportedGuidance]);
+  assertTruthy('unsupported order format message includes detected headers', unsupportedMessage.includes('検出ヘッダー: 独自注文列, 独自顧客列, 備考'), { field: 'message', expected: 'detected headers in message', actual: unsupportedMessage });
+  resetImportIssues();
+  callFunction('recordOrderImportIssues', [unsupportedResult, 'unsupported-orders.csv']);
+  assertIssueType('unsupported order format creates persistent platform issue', getImportIssuesFromDashboard(), 'platform_mapping_warning', { field: 'headers', expected: 'platform_mapping_warning issue' });
 
   const xlsResult = await new Promise((resolve) => {
     ctx.__fixtureFile = { name: 'orders-legacy.xls', _buffer: Buffer.from('legacy') };
@@ -823,6 +954,67 @@ function validateUiTextScan() {
   pass('UI text scan summary', { chineseCount: chineseHits.length, englishCount, japaneseCount });
 }
 
+function validateShipmentQueue() {
+  assertEqual('Phase8 shipment status ready is supported', callFunction('normalizeShipmentStatus', ['ready']), 'ready', { field: 'shipmentStatus' });
+  assertEqual('Phase8 shipment status fallback is imported', callFunction('normalizeShipmentStatus', ['unknown_status']), 'imported', { field: 'shipmentStatus' });
+  assertEqual('Phase8 shipment status label is Japanese', callFunction('getShipmentStatusLabel', ['on_hold']), '保留', { field: 'shipmentStatusLabel' });
+
+  setData('shipnaviDashboardProducts', [
+    { sku: 'SKU-Q-OK', bundleable: true, weight: '500', length: '20', width: '20', height: '20', size: '60' },
+  ]);
+  setData('shipnaviDashboardFareTables', { matrixView: null, normalizedFareRows: [
+    { carrier: 'ヤマト', service: '宅急便', size: '60', zone: '東京', fare: '850', weightLimit: '2000' },
+    { carrier: '佐川', service: '飛脚宅配便', size: '60', zone: '東京', fare: '950', weightLimit: '2000' },
+  ] });
+  setData('shipnaviDashboardOrders', [
+    { id: 'q1', orderNo: 'QUEUE-OK', customer: '出荷テストA', postal: '100-0001', address: '東京都テスト区', sku: 'SKU-Q-OK', quantity: '1', sourcePlatform: 'Fixture', shipmentStatus: 'pending', warnings: [] },
+    { id: 'q2', orderNo: 'QUEUE-POSTAL-ISSUE', customer: '出荷テストB', postal: '', address: '東京都テスト区', sku: 'SKU-Q-OK', quantity: '1', sourcePlatform: 'Fixture', shipmentStatus: 'imported', warnings: ['郵便番号未設定'] },
+    { id: 'q3', orderNo: 'QUEUE-MISSING-PRODUCT', customer: '出荷テストC', postal: '100-0001', address: '東京都テスト区', sku: 'SKU-Q-MISSING', quantity: '1', sourcePlatform: 'Fixture', shipmentStatus: 'imported', warnings: [] },
+  ]);
+  const queueRows = callFunction('getShipmentQueueRows', []);
+  assertEqual('Phase8 shipment queue creates one row per non-bundled shipment', queueRows.length, 3, { field: 'shipmentQueue.length' });
+  const readyRow = queueRows.find((row) => row.orderNos === 'QUEUE-OK');
+  assertEqual('Phase8 shipment queue keeps pending status for clean row', readyRow?.shipmentStatus, 'pending', { field: 'shipmentStatus', actual: readyRow });
+  assertTruthy('Phase8 shipment queue shows recommended shipping method', Boolean(readyRow?.recommendedCarrier), { field: 'recommendedCarrier', actual: readyRow });
+  const errorRow = queueRows.find((row) => row.orderNos === 'QUEUE-POSTAL-ISSUE');
+  assertEqual('Phase8 shipment queue moves critical issue row to error', errorRow?.shipmentStatus, 'error', { field: 'shipmentStatus', actual: errorRow });
+  assertTruthy('Phase8 shipment queue counts issue rows', Number(errorRow?.issueCount) > 0, { field: 'issueCount', actual: errorRow });
+  const holdRow = queueRows.find((row) => row.orderNos === 'QUEUE-MISSING-PRODUCT');
+  assertEqual('Phase8 shipment queue moves blocking recommendation row to hold', holdRow?.shipmentStatus, 'on_hold', { field: 'shipmentStatus', actual: holdRow });
+  const queueSummary = callFunction('getShipmentQueueSummary', []);
+  assertEqual('Phase8 shipment queue summary counts orders', queueSummary.totalOrders, 3, { field: 'totalOrders' });
+  assertTruthy('Phase8 shipment queue summary includes error count', queueSummary.statusCounts.error >= 1, { field: 'statusCounts', actual: queueSummary.statusCounts });
+  const updatedOrders = callFunction('updateShipmentStatusForOrders', [['q1'], 'ready']);
+  assertEqual('Phase8 shipment status action updates selected orders', updatedOrders[0]?.shipmentStatus, 'ready', { field: 'shipmentStatus', actual: updatedOrders });
+  const updatedQueueRows = callFunction('getShipmentQueueRows', []);
+  const updatedReadyRow = updatedQueueRows.find((row) => row.orderNos === 'QUEUE-OK');
+  assertEqual('Phase8 shipment queue reflects status action', updatedReadyRow?.shipmentStatus, 'ready', { field: 'shipmentStatus', actual: updatedReadyRow });
+  const exportPreview = callFunction('getShipmentExportPreview', []);
+  assertEqual('Phase8 shipment export preview counts exportable orders', exportPreview.exportableCount, 1, { field: 'exportableCount', actual: exportPreview });
+  assertEqual('Phase8 shipment export preview counts hold orders', exportPreview.onHoldCount, 1, { field: 'onHoldCount', actual: exportPreview });
+  assertEqual('Phase8 shipment export preview counts error orders', exportPreview.errorCount, 1, { field: 'errorCount', actual: exportPreview });
+  assertEqual('Phase8 shipment export preview counts carrier orders', exportPreview.carrierCounts['ヤマト'], 1, { field: 'carrierCounts', actual: exportPreview.carrierCounts });
+  const exportRows = callFunction('getShipmentExportRows', []);
+  assertEqual('Phase8 shipment export excludes hold and error by default', exportRows.length, 1, { field: 'shipmentExport.length', actual: exportRows });
+  assertEqual('Phase8 shipment export includes order number', exportRows[0]?.注文番号, 'QUEUE-OK', { field: '注文番号', actual: exportRows[0] });
+  assertEqual('Phase8 shipment export includes recommended carrier', exportRows[0]?.推奨配送会社, 'ヤマト', { field: '推奨配送会社', actual: exportRows[0] });
+  assertEqual('Phase8 shipment export includes Japanese status', exportRows[0]?.出荷状態, '出荷準備中', { field: '出荷状態', actual: exportRows[0] });
+  const exportAllRows = callFunction('getShipmentExportRows', [{ includeBlocked: true }]);
+  assertEqual('Phase8 shipment group export can include blocked rows when requested', exportAllRows.length, 3, { field: 'shipmentExport.length', actual: exportAllRows });
+  callFunction('updateShipmentStatusForOrders', [['q1'], 'shipped']);
+  const resultsSummary = callFunction('getShipmentResultsSummary', []);
+  assertEqual('Phase8 results center summary counts total orders', resultsSummary.totalOrders, 3, { field: 'totalOrders', actual: resultsSummary });
+  assertEqual('Phase8 results center summary counts shipped orders', resultsSummary.shippedCount, 1, { field: 'shippedCount', actual: resultsSummary });
+  assertEqual('Phase8 results center summary counts hold orders', resultsSummary.onHoldCount, 1, { field: 'onHoldCount', actual: resultsSummary });
+  assertEqual('Phase8 results center summary counts error orders', resultsSummary.errorCount, 1, { field: 'errorCount', actual: resultsSummary });
+  assertEqual('Phase8 results center carrier breakdown counts Yamato', resultsSummary.carrierCounts['ヤマト'], 2, { field: 'carrierCounts', actual: resultsSummary.carrierCounts });
+  assertTruthy('Phase8 results center carrier breakdown includes Sagawa', Object.prototype.hasOwnProperty.call(resultsSummary.carrierCounts, '佐川'), { field: 'carrierCounts', actual: resultsSummary.carrierCounts });
+  assertTruthy('Phase8 results center carrier breakdown includes Japan Post', Object.prototype.hasOwnProperty.call(resultsSummary.carrierCounts, '日本郵便'), { field: 'carrierCounts', actual: resultsSummary.carrierCounts });
+  assertEqual('Phase8 results center status breakdown counts shipped', resultsSummary.statusCounts.shipped, 1, { field: 'statusCounts', actual: resultsSummary.statusCounts });
+  assertTruthy('Phase8 results center estimated savings uses fare comparison rows', resultsSummary.fareComparisonCount >= 1, { field: 'fareComparisonCount', actual: resultsSummary });
+  assertTruthy('Phase8 results center estimated savings count uses existing savings', resultsSummary.estimatedSavingsCount >= 1, { field: 'estimatedSavingsCount', actual: resultsSummary });
+}
+
 function validateP0Regression() {
   assertEqual('P0-1 postal 100-0001 maps to 東京', callFunction('getZoneByPostal', ['100-0001', '']), '東京', { field: 'postal' });
   assertEqual('P0-1 valid unknown postal does not fallback to address', callFunction('getZoneByPostal', ['999-9999', '東京都テスト区']), 'unknown', { field: 'postal,address' });
@@ -869,6 +1061,7 @@ async function main() {
   await validateImportTemplates();
   validateUiTextScan();
   validatePersistentIssueStatusLifecycle();
+  validateShipmentQueue();
   validateP0Regression();
 
   console.log(`SUMMARY PASS=${results.filter((r) => r.status === 'PASS').length} PENDING=${pendingCount} FAIL=${failureCount}`);

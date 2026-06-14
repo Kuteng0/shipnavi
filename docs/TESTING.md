@@ -124,6 +124,14 @@ Confirm:
 
 `test-fixtures/` must include real-format anonymized samples for 楽天, Yahoo, Amazon, Shopify, BASE, STORES, メルカリShops, 商品マスタ, 送料マトリクス, 配送会社, and 注文データ. Each class must cover normal data, missing SKU, missing weight, invalid postal code, invalid region, mismatched column name, unit error, header not on first row, blank rows, extra explanatory rows, ¥ / 円 / comma amounts, mixed g / kg weights, and mixed cm / mm sizes.
 
+### Phase7 order import checks
+
+- Platform order fixtures must validate missing recipient / customer values as persistent `missing_recipient` issues.
+- Missing recipient rows must show Japanese guidance (`顧客名が見つかりません。`) and must not fail silently.
+- Platform order fixtures must validate import preview metadata for detected platform, row count, mapped fields, missing fields, and warning count.
+- Unsupported order-format checks must validate detected headers, missing standard concepts, Japanese next-step guidance, and persistent issue creation.
+- Existing missing SKU fallback, postal-code, malformed quantity, platform detection, and `sourcePlatform` checks must remain passing.
+
 ### Phase6 per-step commands
 
 After every Phase6 module, run:
@@ -138,3 +146,27 @@ If fixture validation exists, run:
 ```bash
 node scripts/validate-import-fixtures.js
 ```
+
+## Revised Phase8 shipment queue checks
+
+- Shipment status normalization supports `imported`, `pending`, `ready`, `shipped`, `on_hold`, and `error`.
+- 出荷キュー displays 取込済み, 確認待ち, 出荷準備中, 出荷済み, 保留, and エラー.
+- Shipment queue rows include order count, issue count, recommended shipping method, and current status.
+- Orders with unresolved import warnings or blocking recommendation issues appear as 保留 or エラー.
+- P0 postal-zone, fare filtering, bundle eligibility, and shipment grouping checks must remain passing.
+- Shipment status actions can update selected shipment-group orders to 確認待ち, 出荷準備中, 出荷済み, or 保留 without changing shipment grouping or fare calculation.
+
+## Revised Phase8 shipment export checks
+
+- Shipment export preview counts 出荷対象件数, 保留件数, エラー件数, and 配送会社別件数 from current shipment queue rows.
+- Shipment CSV export defaults to excluding `error` / エラー and `on_hold` / 保留 rows.
+- Shipment CSV export rows include 出荷グループ, 注文番号, 顧客名, 郵便番号, 配送先住所, SKU, 数量, 推奨配送会社, 推奨サービス, and 出荷状態.
+- Shipment export validation must keep P0 postal-zone, fare filtering, bundle eligibility, shipment grouping, and Phase7 import checks passing.
+
+## Revised Phase8 shipment results center checks
+
+- Results Center displays 総注文数, 出荷済み件数, 保留件数, and エラー件数 from current shipment queue rows.
+- Carrier breakdown includes ヤマト, 佐川, and 日本郵便 counts.
+- Shipment status breakdown includes 取込済み, 確認待ち, 出荷準備中, 出荷済み, 保留, and エラー.
+- Estimated savings indicators use existing fare recommendation rows only: 推奨配送方式件数, 運賃比較対象件数, and 推定節約件数.
+- Results Center validation must not change `getFareOptions`, `getZoneByPostal`, bundle eligibility, or shipment grouping behavior.

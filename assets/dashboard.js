@@ -39,6 +39,37 @@ const emptyData = {
   importIssues: [],
 };
 
+const shipmentStatusLabels = {
+  imported: '取込済み',
+  pending: '確認待ち',
+  ready: '出荷準備中',
+  shipped: '出荷済み',
+  on_hold: '保留',
+  error: 'エラー',
+};
+const shipmentStatusOrder = ['imported', 'pending', 'ready', 'shipped', 'on_hold', 'error'];
+const shipmentCriticalWarnings = ['顧客名未設定', '郵便番号未設定', '郵便番号形式不正', '配送地域未判定', '数量未設定', '数量形式不正'];
+
+function normalizeShipmentStatus(status) {
+  const normalizedStatus = normalize(status);
+  return shipmentStatusOrder.includes(normalizedStatus) ? normalizedStatus : 'imported';
+}
+
+function getShipmentStatusLabel(status) {
+  return shipmentStatusLabels[normalizeShipmentStatus(status)] || shipmentStatusLabels.imported;
+}
+
+function getShipmentStatusBadgeClass(status) {
+  return {
+    imported: 'blue',
+    pending: 'orange',
+    ready: 'green',
+    shipped: 'green',
+    on_hold: 'orange',
+    error: 'red',
+  }[normalizeShipmentStatus(status)] || 'blue';
+}
+
 function seedDashboardData() {
   Object.entries(keys).forEach(([name, key]) => {
     if (!localStorage.getItem(key)) storage.write(key, emptyData[name]);
@@ -824,6 +855,15 @@ function headerSet(headers) {
 }
 
 const standardOrderFields = ['orderNo', 'customer', 'address', 'sku', 'quantity'];
+const orderPreviewFields = ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'];
+const orderPreviewFieldLabels = {
+  orderNo: '注文番号',
+  customer: '顧客名',
+  postal: '郵便番号',
+  address: '配送先住所',
+  sku: 'SKU',
+  quantity: '数量',
+};
 
 const platformFieldMappings = {
   'ShipNavi標準': {
@@ -840,72 +880,74 @@ const platformFieldMappings = {
   },
   '楽天': {
     requiredSignals: ['注文番号', '個数'],
-    optionalSignals: ['注文者名字', '注文者名前', '送付先氏名', '送付先郵便番号', '送付先住所:都道府県', '送付先住所:都市区', '送付先住所:町以降', '送付先住所', '商品番号', '商品管理番号', '商品名'],
+    optionalSignals: ['注文者名字', '注文者名前', '送付先氏名', '代替受取人', '送付先郵便番号', '送付先住所:都道府県', '送付先住所:都市区', '送付先住所:町以降', '送付先住所', '結合住所', '商品番号', '商品管理番号', '代替SKU', '商品名'],
     fieldCandidates: {
       orderNo: ['注文番号'],
-      customer: [{ fields: ['注文者名字', '注文者名前'], join: '' }, '送付先氏名'],
+      customer: [{ fields: ['注文者名字', '注文者名前'], join: '' }, '送付先氏名', '代替受取人'],
       postal: ['送付先郵便番号'],
-      address: [{ fields: ['送付先住所:都道府県', '送付先住所:都市区', '送付先住所:町以降'], join: '' }, '送付先住所'],
-      sku: ['商品番号', '商品管理番号'],
+      address: [{ fields: ['送付先住所:都道府県', '送付先住所:都市区', '送付先住所:町以降'], join: '' }, '送付先住所', '結合住所'],
+      sku: ['商品番号', '商品管理番号', '代替SKU'],
       productName: ['商品名'],
       quantity: ['個数'],
     },
   },
   Amazon: {
     requiredSignals: ['order-id', 'quantity-purchased'],
-    optionalSignals: ['buyer-email', 'recipient-name', 'ship-postal-code', 'ship-state', 'ship-city', 'ship-address-1', 'sku', 'product-name'],
+    optionalSignals: ['buyer-email', 'recipient-name', '代替受取人', 'ship-postal-code', 'ship-state', 'ship-city', 'ship-address-1', '結合住所', 'sku', '代替SKU', 'product-name'],
     fieldCandidates: {
       orderNo: ['order-id'],
-      customer: ['buyer-email', 'recipient-name'],
+      customer: ['buyer-email', 'recipient-name', '代替受取人'],
       postal: ['ship-postal-code'],
       address: [
         { fields: ['ship-state', 'ship-city', 'ship-address-1'], join: '' },
         { fields: ['ship-state', 'ship-city'], join: '' },
+        '結合住所',
       ],
-      sku: ['sku'],
+      sku: ['sku', '代替SKU'],
       productName: ['product-name'],
       quantity: ['quantity-purchased'],
     },
   },
   'Yahooショッピング': {
     requiredSignals: ['注文id', '数量'],
-    optionalSignals: ['お届け先氏名', '郵便番号', '住所', '商品コード'],
+    optionalSignals: ['お届け先氏名', '代替受取人', '郵便番号', '住所', '結合住所', '商品コード', '代替SKU'],
     fieldCandidates: {
       orderNo: ['注文ID'],
-      customer: ['お届け先氏名'],
+      customer: ['お届け先氏名', '代替受取人'],
       postal: ['郵便番号'],
-      address: ['住所'],
-      sku: ['商品コード'],
+      address: ['住所', '結合住所'],
+      sku: ['商品コード', '代替SKU'],
       productName: ['商品名'],
       quantity: ['数量'],
     },
   },
   Shopify: {
     requiredSignals: ['name', 'lineitem quantity'],
-    optionalSignals: ['shipping name', 'shipping zip', 'shipping province', 'shipping city', 'shipping address1', 'lineitem sku'],
+    optionalSignals: ['shipping name', '代替受取人', 'shipping zip', 'shipping province', 'shipping city', 'shipping address1', '結合住所', 'lineitem sku', '代替SKU'],
     fieldCandidates: {
       orderNo: ['Name'],
-      customer: ['Shipping Name'],
+      customer: ['Shipping Name', '代替受取人'],
       postal: ['Shipping Zip'],
       address: [
         { fields: ['Shipping Province', 'Shipping City', 'Shipping Address1'], join: '' },
         { fields: ['Shipping Province', 'Shipping City'], join: '' },
         'Shipping Address1',
+        '結合住所',
       ],
-      sku: ['Lineitem sku'],
+      sku: ['Lineitem sku', '代替SKU'],
       productName: ['Lineitem name'],
       quantity: ['Lineitem quantity'],
     },
   },
   BASE: {
     requiredSignals: ['注文id', '数量'],
-    optionalSignals: ['購入者名', '郵便番号', '住所', '商品コード'],
+    optionalSignals: ['購入者名', '代替受取人', '郵便番号', '住所', '結合住所', '商品コード', '代替SKU'],
     fieldCandidates: {
       orderNo: ['注文ID'],
-      customer: ['購入者名'],
+      customer: ['購入者名', '代替受取人'],
       postal: ['郵便番号'],
-      address: ['住所'],
-      sku: ['商品コード'],
+      address: ['住所', '結合住所'],
+      sku: ['商品コード', '代替SKU'],
       productName: ['商品名'],
       quantity: ['数量'],
     },
@@ -938,30 +980,31 @@ const platformFieldMappings = {
   },
   STORES: {
     requiredSignals: ['オーダー番号', '数量'],
-    optionalSignals: ['購入者名', '郵便番号', '都道府県', '市区町村', '住所1', '品番', '品番候補'],
+    optionalSignals: ['購入者名', '代替受取人', '郵便番号', '都道府県', '市区町村', '住所1', '結合住所', '品番', '品番候補', '代替SKU'],
     fieldCandidates: {
       orderNo: ['オーダー番号'],
-      customer: ['購入者名'],
+      customer: ['購入者名', '代替受取人'],
       postal: ['郵便番号'],
       address: [
         { fields: ['都道府県', '市区町村', '住所1'], join: '' },
         { fields: ['都道府県', '市区町村'], join: '' },
         '住所1',
+        '結合住所',
       ],
-      sku: ['品番', '品番候補'],
+      sku: ['品番', '品番候補', '代替SKU'],
       productName: ['商品名'],
       quantity: ['数量'],
     },
   },
   'メルカリShops': {
     requiredSignals: ['取引id', '数量'],
-    optionalSignals: ['お届け先氏名', '郵便番号', 'お届け先住所', '商品コード', '商品コード候補'],
+    optionalSignals: ['お届け先氏名', '代替受取人', '郵便番号', 'お届け先住所', '結合住所', '商品コード', '商品コード候補', '代替SKU'],
     fieldCandidates: {
       orderNo: ['取引ID'],
-      customer: ['お届け先氏名'],
+      customer: ['お届け先氏名', '代替受取人'],
       postal: ['郵便番号'],
-      address: ['お届け先住所'],
-      sku: ['商品コード', '商品コード候補'],
+      address: ['お届け先住所', '結合住所'],
+      sku: ['商品コード', '商品コード候補', '代替SKU'],
       productName: ['商品名'],
       quantity: ['数量'],
     },
@@ -1015,6 +1058,80 @@ function getPlatformMissingHeaders(headers, platform) {
   return missing.filter((header, index, list) => list.findIndex((item) => normalizeHeader(item) === normalizeHeader(header)) === index);
 }
 
+function getOrderPreviewMappedFields(headers, platform) {
+  const mapping = platformFieldMappings[platform];
+  if (!mapping?.fieldCandidates) return [];
+  return orderPreviewFields
+    .map((field) => {
+      let candidateGroups = mapping.fieldCandidates[field] || [];
+      if (field === 'sku') {
+        const skuCandidates = mapping.fieldCandidates.sku || [];
+        candidateGroups = skuCandidates.some((candidate) => hasResolvableField(headers, [candidate]))
+          ? skuCandidates
+          : (mapping.fieldCandidates.productName || []);
+      }
+      const matchedHeaders = candidateGroups
+        .map((candidate) => fieldCandidate(candidate))
+        .filter((candidate) => candidate.fields.every((header) => headerSet(headers).has(normalizeHeader(header))))
+        .flatMap((candidate) => candidate.fields);
+      return {
+        field,
+        label: orderPreviewFieldLabels[field] || field,
+        headers: [...new Set(matchedHeaders)],
+      };
+    })
+    .filter((entry) => entry.headers.length);
+}
+
+function buildOrderImportPreview(headers, platform, rowCount, importResult = {}) {
+  const detectedPlatform = platform || 'unknown';
+  return {
+    detectedPlatform,
+    rowCount,
+    mappedFields: getOrderPreviewMappedFields(headers, detectedPlatform),
+    missingFields: importResult.missingHeaders || (detectedPlatform === 'unknown' ? [] : getPlatformMissingHeaders(headers, detectedPlatform)),
+    warningCount: importResult.warningCount || 0,
+    failureCount: importResult.failureCount || 0,
+  };
+}
+
+function getOrderCandidatePool(field) {
+  return Object.values(platformFieldMappings).flatMap((mapping) => {
+    if (field === 'sku') return [...(mapping.fieldCandidates?.sku || []), ...(mapping.fieldCandidates?.productName || [])];
+    return mapping.fieldCandidates?.[field] || [];
+  });
+}
+
+function buildUnsupportedOrderFormatGuidance(headers) {
+  const detectedHeaders = headers.filter((header) => normalize(header));
+  const missingConcepts = standardOrderFields
+    .filter((field) => !hasResolvableField(headers, getOrderCandidatePool(field)))
+    .map((field) => orderPreviewFieldLabels[field] || field);
+  return {
+    detectedHeaders,
+    missingConcepts,
+    nextSteps: [
+      'ShipNavi標準テンプレートに合わせて列名を変更してください。',
+      '注文番号、顧客名、配送先住所、SKU、数量を含めてください。',
+      '商品コードがない場合は商品名列を用意してください。',
+    ],
+  };
+}
+
+function formatUnsupportedOrderFormatGuidance(guidance) {
+  const headerText = guidance.detectedHeaders.length ? guidance.detectedHeaders.join(', ') : 'なし';
+  const missingText = guidance.missingConcepts.length ? guidance.missingConcepts.join('、') : '標準項目との対応を確認してください';
+  return `未対応CSV形式 / 検出ヘッダー: ${headerText} / 不足している項目: ${missingText} / 次の対応: ${guidance.nextSteps.join(' ')}`;
+}
+
+function formatOrderImportPreview(preview) {
+  const mappedText = (preview.mappedFields || [])
+    .map((entry) => `${entry.label}: ${entry.headers.join(' + ')}`)
+    .join('、') || 'なし';
+  const missingText = (preview.missingFields || []).join('、') || 'なし';
+  return `プレビュー: 検出プラットフォーム=${preview.detectedPlatform} / 行数=${preview.rowCount} / マッピング=${mappedText} / 不足している項目=${missingText} / 警告数=${preview.warningCount}`;
+}
+
 function resolveField(row, candidates) {
   return (candidates || []).reduce((found, candidate) => {
     if (found) return found;
@@ -1036,6 +1153,7 @@ function normalizePlatformOrderRow(row, platform) {
   const numericQuantity = toNumber(rawQuantity);
   const warnings = [];
 
+  if (!customer) warnings.push('顧客名未設定');
   if (!postal) warnings.push('郵便番号未設定');
   if (postal && !isValidPostalFormat(postal)) warnings.push('郵便番号形式不正');
   if (postal && isValidPostalFormat(postal) && getZoneByPostal(postal, address) === 'unknown') warnings.push('配送地域未判定');
@@ -1055,6 +1173,7 @@ function normalizePlatformOrderRow(row, platform) {
     sku,
     quantity: String(Math.max(1, numericQuantity || 1)),
     sourcePlatform: platform,
+    shipmentStatus: normalizeShipmentStatus(row.shipmentStatus),
     warnings,
   };
 }
@@ -1077,6 +1196,8 @@ function importOrderCsvRows(rows) {
       missingHeaders: [],
       detectedHeaders: headers,
       allOrders: [],
+      preview: buildOrderImportPreview(headers, 'unknown', rows.length, { failureCount: rows.length }),
+      unsupportedGuidance: buildUnsupportedOrderFormatGuidance(headers),
     };
   }
   const missingHeaders = getPlatformMissingHeaders(headers, platform);
@@ -1091,21 +1212,28 @@ function importOrderCsvRows(rows) {
       missingHeaders,
       detectedHeaders: headers,
       allOrders: [],
+      preview: buildOrderImportPreview(headers, platform, rows.length, { missingHeaders, failureCount: rows.length }),
     };
   }
   const normalizedOrders = rows.map((row) => normalizePlatformOrderRow(row, platform));
   const validOrders = normalizedOrders.filter(hasStandardOrderFields);
-  const warningDetails = [...new Set(validOrders.flatMap((order) => order.warnings || []))];
+  const warningDetails = [...new Set(normalizedOrders.flatMap((order) => order.warnings || []))];
+  const summary = {
+    missingHeaders: [],
+    warningCount: normalizedOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    failureCount: normalizedOrders.length - validOrders.length,
+  };
   return {
     platform,
     orders: validOrders,
     successCount: validOrders.length,
-    failureCount: normalizedOrders.length - validOrders.length,
-    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    failureCount: summary.failureCount,
+    warningCount: summary.warningCount,
     warningDetails,
     missingHeaders: [],
     detectedHeaders: headers,
     allOrders: normalizedOrders,
+    preview: buildOrderImportPreview(headers, platform, rows.length, summary),
   };
 }
 
@@ -1131,6 +1259,7 @@ function normalizeOrder(row) {
     sku: normalize(row.sku),
     quantity: String(Math.max(1, toNumber(row.quantity) || 1)),
     sourcePlatform: normalize(row.sourcePlatform) || 'ShipNavi',
+    shipmentStatus: normalizeShipmentStatus(row.shipmentStatus),
     warnings: Array.isArray(row.warnings) ? row.warnings : (!normalizePostal(row.postal) ? ['\u90f5\u4fbf\u756a\u53f7\u672a\u8a2d\u5b9a'] : []),
   };
 }
@@ -1375,12 +1504,13 @@ function recordOrderImportIssues(importResult, sourceFileName = '') {
     ? Object.values(platformFieldMappings[importResult.platform].fieldCandidates || {}).flatMap((candidates) => (candidates || []).flatMap((candidate) => fieldCandidate(candidate).fields).map(normalizeHeader))
     : [];
   if (importResult.platform === 'unknown') {
+    const guidance = importResult.unsupportedGuidance || buildUnsupportedOrderFormatGuidance(importResult.detectedHeaders || []);
     issues.push(appendImportIssue({
       type: 'platform_mapping_warning',
       sourceFlow: 'order_import',
       sourceFileName,
       field: 'headers',
-      message: '列名を確認してください。取込元プラットフォームを判定できません。',
+      message: formatUnsupportedOrderFormatGuidance(guidance),
     }));
   }
   (importResult.missingHeaders || []).forEach((header) => {
@@ -1435,6 +1565,9 @@ function recordOrderImportIssues(importResult, sourceFileName = '') {
           reason: '商品名をSKUとして利用しています。',
         }),
       }));
+    }
+    if ((order.warnings || []).includes('顧客名未設定') || !normalize(order.customer)) {
+      issues.push(appendImportIssue({ type: 'missing_recipient', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'customer', message: '顧客名が見つかりません。' }));
     }
     if ((order.warnings || []).includes('郵便番号未設定') || !normalizePostal(order.postal)) {
       issues.push(appendImportIssue({ type: 'missing_postal', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'postal', message: '郵便番号が見つかりません。' }));
@@ -1817,6 +1950,129 @@ function getRecommendationRows() {
   return getShipmentGroups();
 }
 
+function getShipmentQueueIssueTexts(shipment, orders) {
+  const warningTexts = [...new Set(orders.flatMap((order) => order.warnings || []).filter(Boolean))];
+  const statusIssue = shipment.status && !shipment.recommendedCarrier ? shipment.status : '';
+  return [...new Set([...warningTexts, statusIssue].filter(Boolean))];
+}
+
+function deriveShipmentQueueStatus(shipment, orders, issueTexts) {
+  const storedStatuses = orders.map((order) => normalizeShipmentStatus(order.shipmentStatus));
+  if (issueTexts.some((text) => shipmentCriticalWarnings.includes(text))) return 'error';
+  if (issueTexts.length || !shipment.recommendedCarrier) return 'on_hold';
+  if (storedStatuses.every((status) => status === 'shipped')) return 'shipped';
+  if (storedStatuses.some((status) => status === 'ready')) return 'ready';
+  if (storedStatuses.some((status) => status === 'pending')) return 'pending';
+  return 'imported';
+}
+
+function getShipmentQueueRows() {
+  const groups = getShipmentOrderGroups();
+  const productsBySku = getProductsBySku();
+  return groups.map((orders, index) => {
+    const shipment = buildShipmentGroup(orders, index, productsBySku);
+    const issueTexts = getShipmentQueueIssueTexts(shipment, orders);
+    const shipmentStatus = deriveShipmentQueueStatus(shipment, orders, issueTexts);
+    return {
+      ...shipment,
+      orderIds: orders.map((order) => order.id),
+      orderCount: orders.length,
+      issueCount: issueTexts.length,
+      issueSummary: issueTexts.join(' / '),
+      shipmentStatus,
+      shipmentStatusLabel: getShipmentStatusLabel(shipmentStatus),
+    };
+  });
+}
+
+function getShipmentQueueSummary() {
+  const rows = getShipmentQueueRows();
+  return {
+    totalOrders: rows.reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    totalIssues: rows.reduce((sum, row) => sum + toNumber(row.issueCount), 0),
+    statusCounts: shipmentStatusOrder.reduce((acc, status) => {
+      acc[status] = rows.filter((row) => row.shipmentStatus === status).length;
+      return acc;
+    }, {}),
+    rows,
+  };
+}
+
+function getShipmentExportPreview() {
+  const rows = getShipmentQueueRows();
+  const exportableRows = rows.filter((row) => !['error', 'on_hold'].includes(row.shipmentStatus));
+  return {
+    exportableCount: exportableRows.reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    onHoldCount: rows.filter((row) => row.shipmentStatus === 'on_hold').reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    errorCount: rows.filter((row) => row.shipmentStatus === 'error').reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    carrierCounts: exportableRows.reduce((acc, row) => {
+      const carrier = row.recommendedCarrier || '未設定';
+      acc[carrier] = (acc[carrier] || 0) + toNumber(row.orderCount);
+      return acc;
+    }, {}),
+  };
+}
+
+function getShipmentExportRows(options = {}) {
+  const includeBlocked = Boolean(options.includeBlocked);
+  const ordersById = Object.fromEntries(getData('orders').map((order) => [order.id, order]));
+  return getShipmentQueueRows()
+    .filter((row) => includeBlocked || !['error', 'on_hold'].includes(row.shipmentStatus))
+    .flatMap((row) => row.orderIds.map((orderId) => {
+      const order = ordersById[orderId] || {};
+      return {
+        '出荷グループ': row.shipmentGroupId,
+        '注文番号': order.orderNo || '',
+        '顧客名': order.customer || '',
+        '郵便番号': order.postal || '',
+        '配送先住所': order.address || '',
+        'SKU': order.sku || '',
+        '数量': order.quantity || '',
+        '推奨配送会社': row.recommendedCarrier || '',
+        '推奨サービス': row.recommendedService || '',
+        '出荷状態': row.shipmentStatusLabel,
+      };
+    }));
+}
+
+function getShipmentResultsSummary() {
+  const rows = getShipmentQueueRows();
+  const statusCounts = shipmentStatusOrder.reduce((acc, status) => {
+    acc[status] = rows.filter((row) => row.shipmentStatus === status).reduce((sum, row) => sum + toNumber(row.orderCount), 0);
+    return acc;
+  }, {});
+  const carrierCounts = ['ヤマト', '佐川', '日本郵便'].reduce((acc, carrier) => {
+    acc[carrier] = rows
+      .filter((row) => normalize(row.recommendedCarrier).includes(normalize(carrier)))
+      .reduce((sum, row) => sum + toNumber(row.orderCount), 0);
+    return acc;
+  }, {});
+  const recommendationRows = rows.filter((row) => row.recommendedCarrier);
+  const comparisonRows = rows.filter((row) => row.recommendedCarrier && row.secondFare !== '');
+  const savingRows = rows.filter((row) => toNumber(row.savings) > 0);
+  return {
+    totalOrders: rows.reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    shippedCount: statusCounts.shipped || 0,
+    onHoldCount: statusCounts.on_hold || 0,
+    errorCount: statusCounts.error || 0,
+    carrierCounts,
+    statusCounts,
+    recommendedMethodCount: recommendationRows.reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    fareComparisonCount: comparisonRows.reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    estimatedSavingsCount: savingRows.reduce((sum, row) => sum + toNumber(row.orderCount), 0),
+    estimatedSavingsAmount: savingRows.reduce((sum, row) => sum + toNumber(row.savings), 0),
+  };
+}
+
+function updateShipmentStatusForOrders(orderIds, shipmentStatus) {
+  const ids = new Set(Array.isArray(orderIds) ? orderIds : []);
+  const nextStatus = normalizeShipmentStatus(shipmentStatus);
+  if (!ids.size) return [];
+  const nextOrders = getData('orders').map((order) => (ids.has(order.id) ? { ...order, shipmentStatus: nextStatus } : order));
+  setData('orders', nextOrders);
+  return nextOrders.filter((order) => ids.has(order.id));
+}
+
 function getResultSummary() {
   const health = getDataHealth();
   const shipments = getShipmentGroups();
@@ -2129,16 +2385,22 @@ function renderOrders(filter = '') {
 function importShipNaviStandardRows(rows, headers) {
   const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi標準' }));
   const validOrders = orders.filter(hasStandardOrderFields);
+  const summary = {
+    missingHeaders: [],
+    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    failureCount: orders.length - validOrders.length,
+  };
   return {
     platform: 'ShipNavi標準',
     orders: validOrders,
     successCount: validOrders.length,
-    failureCount: orders.length - validOrders.length,
+    failureCount: summary.failureCount,
     missingHeaders: [],
-    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    warningCount: summary.warningCount,
     warningDetails: [...new Set(validOrders.flatMap((order) => order.warnings || []))],
     detectedHeaders: headers,
     allOrders: orders,
+    preview: buildOrderImportPreview(headers, 'ShipNavi標準', rows.length, summary),
   };
 }
 
@@ -2169,9 +2431,9 @@ function handleOrderImportFile(file, search) {
       importResult = importShipNaviStandardRows(rows, headers);
     }
     if (!importResult || importResult.platform === 'unknown') {
-      const detectedHeaderText = headers.length ? headers.join(', ') : 'なし';
-      recordOrderImportIssues(importResult || { platform: 'unknown', orders: [], missingHeaders: [], detectedHeaders: headers }, file.name);
-      const message = `未対応CSV形式 / ヘッダー: ${detectedHeaderText} / 後続で手動マッピング対応予定`;
+      const fallbackResult = importResult || { platform: 'unknown', orders: [], missingHeaders: [], detectedHeaders: headers, unsupportedGuidance: buildUnsupportedOrderFormatGuidance(headers) };
+      recordOrderImportIssues(fallbackResult, file.name);
+      const message = formatUnsupportedOrderFormatGuidance(fallbackResult.unsupportedGuidance || buildUnsupportedOrderFormatGuidance(headers));
       if (summary) summary.textContent = message;
       return showToast(message);
     }
@@ -2181,7 +2443,8 @@ function handleOrderImportFile(file, search) {
     renderOrders(search?.value || '');
     const fileType = (fileResult.sourceType || 'csv').toUpperCase();
     const sheetText = fileResult.sheetName ? ` / シート名: ${fileResult.sheetName}` : '';
-    const message = `取込ファイル種別: ${fileType}${sheetText} / 検出プラットフォーム: ${importResult.platform} / 注文件数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0} / 未解決問題数: ${getOpenImportIssues().length}`;
+    const previewText = importResult.preview ? ` / ${formatOrderImportPreview(importResult.preview)}` : '';
+    const message = `取込ファイル種別: ${fileType}${sheetText} / 検出プラットフォーム: ${importResult.platform} / 注文件数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0} / 未解決問題数: ${getOpenImportIssues().length}${previewText}`;
     if (summary) summary.textContent = message;
     showToast(message);
   });
@@ -2215,12 +2478,90 @@ function renderTemplates() {
   `;
 }
 
+function renderShipmentQueue() {
+  const target = document.querySelector('#shipment-queue-view');
+  if (!target) return;
+  const summary = getShipmentQueueSummary();
+  const exportPreview = getShipmentExportPreview();
+  const rows = summary.rows;
+  const statusCards = shipmentStatusOrder.map((status) => `
+    <article class="stat-card"><p>${escapeHtml(getShipmentStatusLabel(status))}</p><strong>${summary.statusCounts[status] || 0}</strong></article>
+  `).join('');
+  const carrierPreview = Object.entries(exportPreview.carrierCounts).length
+    ? Object.entries(exportPreview.carrierCounts).map(([carrier, count]) => `${carrier}: ${toNumber(count).toLocaleString('ja-JP')}件`).join(' / ')
+    : '出荷対象なし';
+  const queueRows = rows.length ? rows.map((row) => {
+    const orderIds = row.orderIds.join(',');
+    const actionButtons = ['pending', 'ready', 'shipped', 'on_hold'].map((status) => `
+      <button class="small-button" type="button" data-shipment-status="${status}" data-order-ids="${escapeHtml(orderIds)}">${escapeHtml(getShipmentStatusLabel(status))}</button>
+    `).join('');
+    return `
+      <tr>
+        <td>${escapeHtml(row.shipmentGroupId)}</td>
+        <td>${escapeHtml(row.orderNos)}</td>
+        <td>${toNumber(row.orderCount).toLocaleString('ja-JP')}</td>
+        <td>${toNumber(row.issueCount).toLocaleString('ja-JP')}</td>
+        <td>${escapeHtml(row.recommendedCarrier ? `${row.recommendedCarrier} ${row.recommendedService}` : row.status || '確認が必要です')}</td>
+        <td><span class="badge ${getShipmentStatusBadgeClass(row.shipmentStatus)}">${escapeHtml(row.shipmentStatusLabel)}</span></td>
+        <td>${escapeHtml(row.issueSummary || 'なし')}</td>
+        <td><div class="row-actions">${actionButtons}</div></td>
+      </tr>
+    `;
+  }).join('') : '<tr><td colspan="8">出荷対象の注文がありません。</td></tr>';
+  target.innerHTML = `
+    <section class="stat-grid full-width">
+      <article class="stat-card"><p>出荷対象注文数</p><strong>${summary.totalOrders}</strong></article>
+      <article class="stat-card"><p>未解決問題数</p><strong>${summary.totalIssues}</strong></article>
+      ${statusCards}
+    </section>
+    <section class="stat-grid full-width">
+      <article class="stat-card"><p>CSV出力対象</p><strong>${exportPreview.exportableCount}</strong></article>
+      <article class="stat-card"><p>保留件数</p><strong>${exportPreview.onHoldCount}</strong></article>
+      <article class="stat-card"><p>エラー件数</p><strong>${exportPreview.errorCount}</strong></article>
+      <article class="stat-card"><p>配送会社別件数</p><strong>${escapeHtml(carrierPreview)}</strong></article>
+    </section>
+    <section class="table-card full-width">
+      <div class="table-toolbar"><div><h2>出荷対象一覧</h2><p class="help-text">注文取込後の出荷キューです。未解決の問題がある注文は保留またはエラーとして表示し、CSV出力から標準で除外します。</p></div><button class="button secondary" type="button" id="export-shipment-csv">出荷CSV出力</button></div>
+      <div class="responsive-table"><table><thead><tr><th>出荷グループ</th><th>対象注文番号</th><th>注文数</th><th>問題数</th><th>推奨配送方式</th><th>現在の状態</th><th>問題内容</th><th>操作</th></tr></thead><tbody>${queueRows}</tbody></table></div>
+    </section>
+  `;
+  if (target.dataset.shipmentQueueActions !== 'ready') {
+    target.dataset.shipmentQueueActions = 'ready';
+    target.addEventListener('click', (event) => {
+      const button = event.target.closest?.('[data-shipment-status][data-order-ids]');
+      if (!button) return;
+      const orderIds = button.dataset.orderIds.split(',').filter(Boolean);
+      const nextStatus = normalizeShipmentStatus(button.dataset.shipmentStatus);
+      updateShipmentStatusForOrders(orderIds, nextStatus);
+      renderShipmentQueue();
+      showToast(`出荷状態を${getShipmentStatusLabel(nextStatus)}に更新しました。`);
+    });
+    target.addEventListener('click', (event) => {
+      if (!event.target.closest?.('#export-shipment-csv')) return;
+      const exportRows = getShipmentExportRows();
+      if (!exportRows.length) {
+        showToast('出荷CSV出力対象がありません。');
+        return;
+      }
+      downloadCsv('shipnavi-shipments.csv', exportRows);
+      showToast('出荷CSVを出力しました。');
+    });
+  }
+}
+
 function renderResults() {
   const target = document.querySelector('#results-view');
   if (!target) return;
   const summary = getResultSummary();
   const shipments = getShipmentGroups();
+  const shipmentResults = getShipmentResultsSummary();
   const health = getDataHealth();
+  const carrierBreakdown = Object.entries(shipmentResults.carrierCounts).map(([carrier, count]) => `
+    <article class="stat-card"><p>${escapeHtml(carrier)}</p><strong>${toNumber(count).toLocaleString('ja-JP')}</strong></article>
+  `).join('');
+  const shipmentStatusBreakdown = shipmentStatusOrder.map((status) => `
+    <article class="stat-card"><p>${escapeHtml(getShipmentStatusLabel(status))}</p><strong>${toNumber(shipmentResults.statusCounts[status]).toLocaleString('ja-JP')}</strong></article>
+  `).join('');
   const alertPanel = summary.errors.length ? `
     <section class="panel full-width">
       <h2>エラー</h2>
@@ -2254,6 +2595,32 @@ function renderResults() {
       <article class="stat-card"><p>同梱数</p><strong>${summary.bundleCount}</strong></article>
       <article class="stat-card"><p>推奨配送方法</p><strong>${escapeHtml(summary.topRecommendation ? `${summary.topRecommendation.recommendedCarrier} ${summary.topRecommendation.recommendedService}` : '-')}</strong></article>
       <article class="stat-card"><p>削減見込み額</p><strong>${formatYen(summary.saving)}</strong></article>
+    </section>
+    <section class="table-card full-width">
+      <div class="table-toolbar"><div><h2>出荷結果サマリー</h2><p class="help-text">今日の出荷運用状況を、現在の出荷キューと既存の運賃比較結果から集計します。</p></div></div>
+      <div class="stat-grid">
+        <article class="stat-card"><p>総注文数</p><strong>${toNumber(shipmentResults.totalOrders).toLocaleString('ja-JP')}</strong></article>
+        <article class="stat-card"><p>出荷済み件数</p><strong>${toNumber(shipmentResults.shippedCount).toLocaleString('ja-JP')}</strong></article>
+        <article class="stat-card"><p>保留件数</p><strong>${toNumber(shipmentResults.onHoldCount).toLocaleString('ja-JP')}</strong></article>
+        <article class="stat-card"><p>エラー件数</p><strong>${toNumber(shipmentResults.errorCount).toLocaleString('ja-JP')}</strong></article>
+      </div>
+    </section>
+    <section class="table-card full-width">
+      <div class="table-toolbar"><div><h2>配送会社別件数</h2><p class="help-text">推奨配送会社が判定済みの出荷グループを配送会社別に集計します。</p></div></div>
+      <div class="stat-grid">${carrierBreakdown}</div>
+    </section>
+    <section class="table-card full-width">
+      <div class="table-toolbar"><div><h2>出荷状態別件数</h2><p class="help-text">取込済み、確認待ち、出荷準備中、出荷済み、保留、エラーの現在件数です。</p></div></div>
+      <div class="stat-grid">${shipmentStatusBreakdown}</div>
+    </section>
+    <section class="table-card full-width">
+      <div class="table-toolbar"><div><h2>推定削減サマリー</h2><p class="help-text">既存の運賃比較結果のみを使用し、計算ロジックは変更しません。</p></div></div>
+      <div class="stat-grid">
+        <article class="stat-card"><p>推奨配送方式件数</p><strong>${toNumber(shipmentResults.recommendedMethodCount).toLocaleString('ja-JP')}</strong></article>
+        <article class="stat-card"><p>運賃比較対象件数</p><strong>${toNumber(shipmentResults.fareComparisonCount).toLocaleString('ja-JP')}</strong></article>
+        <article class="stat-card"><p>推定節約件数</p><strong>${toNumber(shipmentResults.estimatedSavingsCount).toLocaleString('ja-JP')}</strong></article>
+        <article class="stat-card"><p>推定節約額</p><strong>${formatYen(shipmentResults.estimatedSavingsAmount)}</strong></article>
+      </div>
     </section>
     ${alertPanel}
     <section class="table-card full-width">
@@ -2332,6 +2699,7 @@ if (document.body.classList.contains('app-body')) {
   initCarriers();
   initOrders();
   renderTemplates();
+  renderShipmentQueue();
   renderResults();
   renderSettings();
   initImportIssueActions();
