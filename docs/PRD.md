@@ -26,6 +26,20 @@ Core requirements:
 - Preserve `bundleable` status so bundle rules can reject ineligible products.
 - Warn when imported product data is incomplete, especially when SKU or weight is missing.
 
+Phase6 size estimation acceptance:
+
+- 商品マスタ取込時に 長さ / 幅 / 高さ または length / width / height / 奥行き / 横 / 縦 / 高さ / 三辺 / 三辺合計 を認識する。
+- 三辺合計 = 長さ + 幅 + 高さ で日本宅配サイズを自動判定する。
+- 0 < 三辺合計 <= 60 は 60、60 < 三辺合計 <= 80 は 80、80 < 三辺合計 <= 100 は 100、100 < 三辺合計 <= 120 は 120、120 < 三辺合計 <= 140 は 140、140 < 三辺合計 <= 160 は 160 とする。
+- 160 を超える場合は oversized issue を生成する。
+- 自動判定した size は商品データへ保存する。
+- 推算過程を issue log に残す。
+- 原始 size と自動判定 size が一致しない場合は warning issue を生成する。
+- length / width / height のいずれかが不足する場合は issue を生成する。
+- mm 単位は cm へ変換する。
+- 単位不明の場合は `unit_mismatch` issue を生成する。
+- 文案例: 三辺合計から配送サイズを自動判定しました。入力サイズと自動判定サイズが一致しません。サイズ単位を確認してください。三辺サイズが160サイズを超えています。
+
 ### 3.2 配送会社管理
 
 Carrier management stores fare rows that represent carrier, service, size, zone, weight limit, and fare. The dashboard currently focuses on supported Japanese carriers and local fare-table management.
@@ -113,6 +127,43 @@ Core requirements:
 - Estimate bundled size from item dimensions and largest item size.
 - Keep bundle status visible in order and result screens.
 
+### 3.8 クロスページ persistent issue 表示
+
+Phase6 では、取込エラーや警告を一度だけ toast で表示して終わらせず、未解決 issue として全ページから確認できる状態にする。
+
+対象 issue:
+
+- SKU 缺失 / SKU が見つからない。
+- 重量缺失 / 重量が見つからない。
+- 地区缺失 / 配送地域を判定できない。
+- 邮编错误 / 郵便番号の形式が正しくない。
+- 列名错误 / 列名を確認する必要がある。
+- 单位错误 / サイズまたは重量の単位を確認する必要がある。
+- 商品尺寸推算异常 / 三辺サイズの自動判定に問題がある。
+- 平台字段映射失败 / プラットフォーム項目を標準項目へ対応できない。
+
+表示要件:
+
+- Dashboard、Products、Orders、Carriers、Results の各ページ上部に未解決問題数を表示する。
+- クリック後に issue 詳細を確認できる。
+- issue の発生元ページへ移動できる。
+- issue を閉じるまで継続表示する。
+- ユーザーがデータを修正した場合は自動的に `resolved` にする。
+- ユーザーが手動で閉じた場合は `dismissed` にする。
+- toast の一回限り表示だけで済ませない。
+- 静默失败を禁止する。
+
+日语文案例:
+
+- 未解決の取込エラーがあります。
+- 商品コードが見つかりません。
+- 重量が見つかりません。
+- 郵便番号の形式が正しくありません。
+- 配送地域を判定できません。
+- 列名を確認してください。
+
+
+### 3.9 日语后台
 ### 3.8 日语后台
 
 The dashboard is intended for Japanese operations teams and should keep Japanese labels, messages, and domain terms.
@@ -123,6 +174,15 @@ Core requirements:
 - Import errors and summaries should be understandable to Japanese operators.
 - Shipping domain terms such as 同梱, 運賃表, 配送会社, 郵便番号, and 注文取込 should remain consistent.
 
+Phase6 UI language acceptance:
+
+- 最終ユーザーが見る UI は日本語に統一する。
+- 対象はナビゲーション、ページタイトル、ボタン、表格表头、空状態、成功提示、エラー提示、警告提示、導入 summary、issue panel、テンプレートダウンロード、フォーム placeholder、結果センター、CSV / Excel 出力文案。
+- SKU、CSV、Excel、API、ID、URL、matrixView、normalizedFareRows などの業界・技術用語は保持できるが、説明文は日本語にする。
+- 禁止文言: 商品主档、不足字段、CSV导出、推荐配送方式、节省金额、导入来源平台。
+- 置換後文言: 商品マスタ、不足している項目、CSV出力、推奨配送方法、削減見込み額、取込元プラットフォーム。
+
+### 3.10 手机端管理
 ### 3.9 手机端管理
 
 The dashboard includes a responsive app navigation toggle and should remain usable on mobile devices for lightweight operations review.
@@ -133,6 +193,49 @@ Core requirements:
 - Tables should remain readable through responsive table containers.
 - Primary operations such as searching orders, reviewing results, and checking import status should work on small screens.
 
+### 3.11 AI導入修正アシスタント（将来対応）
+
+CSV / Excel 取込時に、ユーザーが修正すべき問題を自動検出し、修正候補を提示する将来機能。Phase6 では AI による自動修正は実装せず、その前提となる issue model と persistent warning panel までを対象にする。AI による修正候補生成と自動修正は Phase10 の対象とする。
+
+目的:
+
+- CSV / Excel 取込時に、ユーザーが修正すべき問題を自動検出する。
+- 検出した問題に対して、列マッピング、単位変換、値修正などの修正候補を提示する。
+- 修正前後の差分をユーザーが確認できる状態にしてから保存する。
+
+検出対象:
+
+- 必須項目の不足。
+- 列名の不一致。
+- 単位の不一致。
+- 重量形式の不正。
+- 郵便番号形式の不正。
+- 配送地域の判定失敗。
+- SKU / 商品コード / 品番 の対応不一致。
+
+表示例:
+
+```text
+検出した問題:
+第15行に SKU がありません。
+
+修正候補:
+「商品コード」列を SKU として扱えます。
+
+操作:
+- 自動修正する
+- 手動で修正する
+- この警告を閉じる
+```
+
+制約:
+
+- Phase6では実装しない。
+- Phase6では issue model / persistent warning panel までを実装対象にする。
+- AIによる自動修正は Phase10 の対象にする。
+- 自動修正する場合も、保存前に必ずユーザー確認を行う。
+- 元ファイルは上書きしない。
+- 修正後データは CSV / Excel として再出力できるようにする。
 ### 3.10 未来 AI 导入修复助手
 
 Future versions should include an AI-assisted import repair workflow for unsupported or partially mapped files.

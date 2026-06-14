@@ -89,3 +89,52 @@ Confirm:
 - Orders with missing product master records are not bundleable.
 - Products with `bundleable: false` are not bundleable.
 - Bundle candidates require every order in the group to be bundleable.
+
+
+## Phase6 acceptance additions
+
+### Cross-page persistent issue checks
+
+- Dashboard, Products, Orders, Carriers, and Results show unresolved issue counts when open import issues exist.
+- Issue details can be opened from the top page indicator.
+- Issue details can navigate to the source page.
+- Issues remain visible until `resolved` or `dismissed`.
+- Toast-only warnings are not sufficient.
+- Silent failures are not allowed.
+
+### Generated template checks
+
+- CSV and Excel templates are generated from current field definitions.
+- Template downloads cover 商品マスタ, 送料マトリクス, 配送会社, 注文データ, 楽天, Yahoo, Amazon, Shopify, BASE, STORES, and メルカリShops.
+- Templates include required columns, optional columns, sample rows, notes, Excel instruction sheet, and Excel data entry sheet.
+- Downloaded CSV and Excel templates can be uploaded back into the importer for validation.
+- iPhone Safari can download templates through a user tap.
+
+### Product size estimation checks
+
+- Length / width / height aliases and 三辺合計 are detected.
+- mm units are converted to cm.
+- Unknown units create `unit_mismatch` issues.
+- Missing dimensions create issues.
+- Size mismatch creates warning issues.
+- Over 160 creates oversized issues.
+- Calculated size is stored on the product row.
+
+### Fixture coverage checks
+
+`test-fixtures/` must include real-format anonymized samples for 楽天, Yahoo, Amazon, Shopify, BASE, STORES, メルカリShops, 商品マスタ, 送料マトリクス, 配送会社, and 注文データ. Each class must cover normal data, missing SKU, missing weight, invalid postal code, invalid region, mismatched column name, unit error, header not on first row, blank rows, extra explanatory rows, ¥ / 円 / comma amounts, mixed g / kg weights, and mixed cm / mm sizes.
+
+### Phase6 per-step commands
+
+After every Phase6 module, run:
+
+```bash
+node --check assets/dashboard.js
+git diff --check
+```
+
+If fixture validation exists, run:
+
+```bash
+node scripts/validate-import-fixtures.js
+```
