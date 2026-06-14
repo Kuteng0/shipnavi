@@ -21,6 +21,7 @@ const keys = {
   templateMappings: 'shipnaviDashboardTemplateMappings',
   resultSnapshots: 'shipnaviDashboardResultSnapshots',
   settings: 'shipnaviDashboardSettings',
+  importIssues: 'shipnaviDashboardImportIssues',
 };
 
 const supportedCarriers = ['ヤマト', '佐川', '日本郵便'];
@@ -35,6 +36,7 @@ const emptyData = {
   templateMappings: [],
   resultSnapshots: [],
   settings: { company: 'ShipNavi', email: 'shipping@example.jp', defaultCarrier: 'ヤマト', cutoffTime: '15:00' },
+  importIssues: [],
 };
 
 function seedDashboardData() {
@@ -49,6 +51,174 @@ function getData(name) {
 
 function setData(name, value) {
   storage.write(keys[name], value);
+}
+
+function normalizeIssueStatus(status) {
+  return ['open', 'dismissed', 'resolved'].includes(status) ? status : 'open';
+}
+
+function normalizeIssueSuggestion(issueId, issueType, suggestion = null) {
+  if (!suggestion) return null;
+  return {
+    issueId,
+    issueType,
+    sourceField: normalize(suggestion.sourceField),
+    detectedColumn: normalize(suggestion.detectedColumn),
+    suggestedField: normalize(suggestion.suggestedField),
+    suggestedValue: suggestion.suggestedValue ?? null,
+    confidence: Number.isFinite(Number(suggestion.confidence)) ? Number(suggestion.confidence) : 0,
+    reason: normalize(suggestion.reason),
+    status: normalize(suggestion.status || 'pending') || 'pending',
+  };
+}
+
+function normalizeImportIssue(issue = {}) {
+  const now = new Date().toISOString();
+  const id = normalize(issue.id) || makeId('issue');
+  const type = normalize(issue.type) || 'import_warning';
+  return {
+    id,
+    type,
+    severity: normalize(issue.severity) || 'warning',
+    sourceFlow: normalize(issue.sourceFlow),
+    sourceFileName: normalize(issue.sourceFileName),
+    sourcePlatform: normalize(issue.sourcePlatform),
+    rowNumber: issue.rowNumber ?? '',
+    field: normalize(issue.field),
+    detectedColumn: normalize(issue.detectedColumn),
+    message: normalize(issue.message) || '未解決の取込エラーがあります。',
+    status: normalizeIssueStatus(issue.status),
+    createdAt: normalize(issue.createdAt) || now,
+    updatedAt: normalize(issue.updatedAt) || now,
+    suggestion: normalizeIssueSuggestion(id, type, issue.suggestion),
+  };
+}
+
+function getImportIssues() {
+  const issues = getData('importIssues');
+  return Array.isArray(issues) ? issues.map(normalizeImportIssue) : [];
+}
+
+function setImportIssues(issues) {
+  setData('importIssues', Array.isArray(issues) ? issues.map(normalizeImportIssue) : []);
+}
+
+function addImportIssue(issue) {
+  const normalizedIssue = normalizeImportIssue(issue);
+  setImportIssues([...getImportIssues(), normalizedIssue]);
+  return normalizedIssue;
+}
+
+function updateImportIssueStatus(issueId, status) {
+  const now = new Date().toISOString();
+  const normalizedStatus = normalizeIssueStatus(status);
+  setImportIssues(getImportIssues().map((issue) => (
+    issue.id === issueId ? { ...issue, status: normalizedStatus, updatedAt: now } : issue
+  )));
+}
+
+function dismissImportIssue(issueId) {
+  updateImportIssueStatus(issueId, 'dismissed');
+}
+
+function resolveImportIssue(issueId) {
+  updateImportIssueStatus(issueId, 'resolved');
+}
+
+function getOpenImportIssues() {
+  return getImportIssues().filter((issue) => issue.status === 'open');
+}
+
+function clearResolvedImportIssues() {
+  setImportIssues(getImportIssues().filter((issue) => issue.status !== 'resolved'));
+}
+
+function makeImportSuggestion(issueType, options = {}) {
+  return {
+    issueId: options.issueId || '',
+    issueType,
+    sourceField: options.sourceField || '',
+    detectedColumn: options.detectedColumn || '',
+    suggestedField: options.suggestedField || '',
+    suggestedValue: options.suggestedValue ?? null,
+    confidence: options.confidence ?? 0,
+    reason: options.reason || '',
+    status: options.status || 'pending',
+  };
+}
+
+function isValidPostalFormat(value) {
+  const digits = normalizePostal(value).replace(/[^0-9]/g, '');
+  return digits.length === 7;
+}
+
+function appendImportIssue(issue) {
+  const addedIssue = addImportIssue({ severity: 'warning', status: 'open', ...issue });
+  renderGlobalImportIssues();
+  return addedIssue;
+}
+
+function getImportIssueSourceHref(issue) {
+  if (issue.sourceFlow === 'product_import') return 'products.html';
+  if (issue.sourceFlow === 'order_import') return 'orders.html';
+  if (issue.sourceFlow === 'fare_import') return 'carriers.html';
+  return 'index.html';
+}
+
+function renderImportIssuePanelHtml(issues) {
+  if (!issues.length) return '';
+  const issueRows = issues.map((issue) => {
+    const meta = [issue.sourcePlatform, issue.sourceFileName, issue.rowNumber ? `${issue.rowNumber}行目` : '', issue.field]
+      .filter(Boolean)
+      .map(escapeHtml)
+      .join(' / ');
+    const suggestion = issue.suggestion?.reason ? `<p class="muted">修正候補があります。${escapeHtml(issue.suggestion.reason)} 自動修正はまだ利用できません。今後のバージョンで対応予定です。</p>` : '';
+    return `
+      <article class="panel issue-item">
+        <p><strong>${escapeHtml(issue.message)}</strong></p>
+        ${meta ? `<p class="muted">${meta}</p>` : ''}
+        ${suggestion}
+        <div class="button-row">
+          <a class="button secondary" href="${escapeHtml(getImportIssueSourceHref(issue))}">問題の画面を開く</a>
+          <button class="button secondary" type="button" data-dismiss-import-issue="${escapeHtml(issue.id)}">この警告を閉じる</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+  return `
+    <section class="panel full-width import-issue-panel" id="global-import-issues">
+      <details>
+        <summary>未解決の取込エラーがあります。未解決 ${issues.length}件</summary>
+        <p>商品コードが見つかりません。重量が見つかりません。郵便番号の形式が正しくありません。配送地域を判定できません。列名を確認してください。</p>
+        <div class="issue-list">${issueRows}</div>
+      </details>
+    </section>
+  `;
+}
+
+function renderGlobalImportIssues() {
+  if (typeof document === 'undefined' || !document.querySelector) return;
+  const anchor = document.querySelector('.app-main') || document.querySelector('main') || document.querySelector('.app-topbar')?.parentElement;
+  if (!anchor) return;
+  document.querySelector('#global-import-issues')?.remove();
+  const html = renderImportIssuePanelHtml(getOpenImportIssues());
+  if (!html) return;
+  const holder = document.createElement('div');
+  holder.innerHTML = html;
+  const panel = holder.firstElementChild;
+  if (!panel) return;
+  anchor.prepend(panel);
+}
+
+function initImportIssueActions() {
+  if (typeof document === 'undefined' || !document.addEventListener) return;
+  document.addEventListener('click', (event) => {
+    const issueId = event.target?.dataset?.dismissImportIssue;
+    if (!issueId) return;
+    dismissImportIssue(issueId);
+    renderGlobalImportIssues();
+    showToast('取込エラーを閉じました。');
+  });
 }
 
 function makeId(prefix) {
@@ -72,6 +242,13 @@ function normalizeCarrier(value) {
 function toNumber(value) {
   const numeric = Number(String(value ?? '').replace(/[^\d.-]/g, ''));
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function parseWeightLimitValue(value) {
+  const text = normalize(value).toLowerCase();
+  const numeric = toNumber(text);
+  if (!numeric) return '';
+  return String(/kg|キロ/.test(text) ? Math.round(numeric * 1000) : numeric);
 }
 
 function formatYen(value) {
@@ -148,10 +325,230 @@ function downloadCsv(fileName, rows) {
   URL.revokeObjectURL(link.href);
 }
 
+function downloadBlob(fileName, blob) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName;
+  if (document.body?.appendChild) document.body.appendChild(link);
+  link.click();
+  if (link.remove) link.remove();
+  URL.revokeObjectURL(link.href);
+}
+
+function xmlEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let index = 0; index < bytes.length; index += 1) {
+    crc ^= bytes[index];
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeUint16(bytes, value) {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff);
+}
+
+function writeUint32(bytes, value) {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+}
+
+function encodeUtf8(text) {
+  return new TextEncoder().encode(String(text));
+}
+
+function buildZip(entries) {
+  const output = [];
+  const central = [];
+  let offset = 0;
+  entries.forEach((entry) => {
+    const nameBytes = encodeUtf8(entry.name);
+    const dataBytes = encodeUtf8(entry.content);
+    const checksum = crc32(dataBytes);
+    const localOffset = offset;
+    writeUint32(output, 0x04034b50);
+    writeUint16(output, 20);
+    writeUint16(output, 0x0800);
+    writeUint16(output, 0);
+    writeUint16(output, 0);
+    writeUint16(output, 0);
+    writeUint32(output, checksum);
+    writeUint32(output, dataBytes.length);
+    writeUint32(output, dataBytes.length);
+    writeUint16(output, nameBytes.length);
+    writeUint16(output, 0);
+    output.push(...nameBytes, ...dataBytes);
+    offset = output.length;
+
+    writeUint32(central, 0x02014b50);
+    writeUint16(central, 20);
+    writeUint16(central, 20);
+    writeUint16(central, 0x0800);
+    writeUint16(central, 0);
+    writeUint16(central, 0);
+    writeUint16(central, 0);
+    writeUint32(central, checksum);
+    writeUint32(central, dataBytes.length);
+    writeUint32(central, dataBytes.length);
+    writeUint16(central, nameBytes.length);
+    writeUint16(central, 0);
+    writeUint16(central, 0);
+    writeUint16(central, 0);
+    writeUint16(central, 0);
+    writeUint32(central, 0);
+    writeUint32(central, localOffset);
+    central.push(...nameBytes);
+  });
+  const centralOffset = output.length;
+  output.push(...central);
+  writeUint32(output, 0x06054b50);
+  writeUint16(output, 0);
+  writeUint16(output, 0);
+  writeUint16(output, entries.length);
+  writeUint16(output, entries.length);
+  writeUint32(output, central.length);
+  writeUint32(output, centralOffset);
+  writeUint16(output, 0);
+  return new Uint8Array(output).buffer;
+}
+
+function columnName(index) {
+  let name = '';
+  let current = index + 1;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    current = Math.floor((current - 1) / 26);
+  }
+  return name;
+}
+
+function worksheetXml(rows) {
+  const sheetData = rows.map((row, rowIndex) => `
+    <row r="${rowIndex + 1}">${row.map((value, cellIndex) => `<c r="${columnName(cellIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`).join('')}</row>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`;
+}
+
+function buildXlsxWorkbook(sheets) {
+  const workbookSheets = sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join('');
+  const relationships = sheets.map((sheet, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join('');
+  const sheetContentTypes = sheets.map((sheet, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('');
+  const entries = [
+    { name: '[Content_Types].xml', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheetContentTypes}</Types>` },
+    { name: '_rels/.rels', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>` },
+    ...sheets.map((sheet, index) => ({ name: `xl/worksheets/sheet${index + 1}.xml`, content: worksheetXml(sheet.rows) })),
+  ];
+  return buildZip(entries);
+}
+
+function templateRowsFor(type) {
+  const productRows = [
+    ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否', '注意事項'],
+    ['SKU-001', 'サンプル商品', '500', '60', '20', '15', '10', '可', '重量はg、寸法はcmで入力してください。'],
+  ];
+  const orderRows = [
+    ['注文番号', '顧客名', '郵便番号', '配送先住所', 'SKU', '数量', 'プラットフォーム', '注意事項'],
+    ['ORD-001', '匿名顧客A', '100-0001', '東京都千代田区匿名1-1-1', 'SKU-001', '1', 'ShipNavi標準', '個人情報は匿名化してからアップロードしてください。'],
+  ];
+  const fareRows = [
+    ['サイズ', '重量', '東京', '関東', '関西', '九州', '沖縄'],
+    ['60', '2kg', '850', '900', '950', '1100', '1300'],
+    ['80', '5kg', '1050', '1100', '1200', '1400', '1700'],
+  ];
+  if (type === 'products') return productRows;
+  if (type === 'orders') return orderRows;
+  if (type === 'fares') return fareRows;
+  return [];
+}
+
+function templateDescriptionRows(type) {
+  const common = [
+    ['項目', '説明'],
+    ['入力データ', '1枚目の入力データにサンプル行を残したまま、値を置き換えてアップロードできます。'],
+    ['CSV', 'CSVテンプレートはダウンロード後、そのまま再アップロードして取込テストできます。'],
+  ];
+  if (type === 'products') {
+    return [
+      ...common,
+      ['SKU', '商品を一意に識別するコードです。商品コード、品番、商品IDからの自動判定にも対応します。'],
+      ['重量', 'gまたはkgで入力できます。単位が不明な場合は取込時に警告します。'],
+      ['サイズ', '60/80/100/120/140/160サイズを入力します。長さ・幅・高さから自動判定できます。'],
+      ['同梱可否', '可、不可、はい、いいえなどを入力します。'],
+    ];
+  }
+  if (type === 'orders') {
+    return [
+      ...common,
+      ['ShipNavi標準', '注文番号、顧客名、郵便番号、配送先住所、SKU、数量を基本項目として取り込みます。'],
+      ['楽天', '注文番号、注文者名字、注文者名前、送付先郵便番号、送付先住所、商品番号、商品名、個数を自動判定します。'],
+      ['Yahoo', '注文ID、お届け先氏名、郵便番号、住所、商品コード、商品名、数量を自動判定します。'],
+      ['Amazon', '注文番号、宛先氏名、郵便番号、配送先住所、SKU、商品名、数量を自動判定します。'],
+      ['Shopify', '注文番号、配送先氏名、郵便番号、配送先住所、SKU、数量を自動判定します。'],
+      ['BASE', '注文ID、購入者名、郵便番号、住所、商品コード、商品名、数量を自動判定します。'],
+      ['STORES', 'オーダー番号、購入者名、郵便番号、都道府県、市区町村、住所1、品番、数量を自動判定します。'],
+      ['メルカリShops', '取引ID、お届け先氏名、郵便番号、お届け先住所、商品コード、数量を自動判定します。'],
+    ];
+  }
+  return [
+    ...common,
+    ['マトリクス形式', 'サイズ、重量、地域列（東京、関東、関西など）を横持ちで入力します。'],
+    ['縦持ち形式', '配送会社、サービス、配送サイズ、配送地域、送料、重量上限を縦持ちで入力できます。'],
+    ['注意事項', '金額は数字、¥、円、カンマを含めて入力できます。重量上限はkgまたはgで入力してください。'],
+  ];
+}
+
+function generateImportTemplate(type, format) {
+  const normalizedType = normalize(type);
+  const normalizedFormat = normalize(format).toLowerCase();
+  const rows = templateRowsFor(normalizedType);
+  const descriptionRows = templateDescriptionRows(normalizedType);
+  const prefix = { products: '商品マスタ', orders: '注文データ', fares: '送料マトリクス' }[normalizedType] || '取込';
+  if (!rows.length || !['csv', 'xlsx'].includes(normalizedFormat)) {
+    return { type: normalizedType, format: normalizedFormat, fileName: '', rows: [], sheets: [], errors: ['テンプレート種別を確認してください。'] };
+  }
+  const fileName = `shipnavi-${normalizedType}-template.${normalizedFormat}`;
+  const sheets = [
+    { name: '入力データ', rows },
+    { name: '入力説明', rows: descriptionRows },
+  ];
+  if (normalizedFormat === 'csv') {
+    return { type: normalizedType, format: 'csv', fileName, rows, sheets: [sheets[0]], csvText: rows.map((row) => row.map(csvValue).join(',')).join('\r\n'), errors: [] };
+  }
+  return { type: normalizedType, format: 'xlsx', fileName, rows, sheets, arrayBuffer: buildXlsxWorkbook(sheets), errors: [], label: prefix };
+}
+
+function downloadImportTemplate(type, format) {
+  const template = generateImportTemplate(type, format);
+  if (template.errors?.length) return showToast(template.errors.join(' '));
+  if (template.format === 'csv') {
+    downloadBlob(template.fileName, new Blob([`\uFEFF${template.csvText}`], { type: 'text/csv;charset=utf-8' }));
+  } else {
+    downloadBlob(template.fileName, new Blob([template.arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  }
+  showToast(`${template.label || '取込'}${template.format.toUpperCase()}テンプレートをダウンロードしました。`);
+}
+
 function readFileAsText(file, callback) {
   const reader = new FileReader();
   reader.addEventListener('load', () => callback(String(reader.result || '').replace(/^\uFEFF/, '')));
   reader.readAsText(file);
+}
+
+function readFileAsArrayBuffer(file, callback, errorCallback = () => {}) {
+  const reader = new FileReader();
+  reader.addEventListener('load', () => callback(reader.result));
+  reader.addEventListener('error', () => errorCallback('ファイルを読み込めませんでした。'));
+  reader.readAsArrayBuffer(file);
 }
 
 function normalizeHeader(value) {
@@ -191,6 +588,179 @@ function isExcelFile(file) {
   return /\.(xlsx|xls)$/i.test(file?.name || '');
 }
 
+const XLS_SUPPORTED = false;
+const XLSX_SUPPORTED = true;
+
+function isXlsFile(file) {
+  return /\.xls$/i.test(file?.name || '') && !/\.xlsx$/i.test(file?.name || '');
+}
+
+function isXlsxFile(file) {
+  return /\.xlsx$/i.test(file?.name || '');
+}
+
+function createImportFileResult({ rows = [], sourceType = '', sheetName = '', warnings = [], errors = [] } = {}) {
+  return { rows, sourceType, sheetName, warnings, errors };
+}
+
+function excelFormatErrorResult(sourceType = 'xls') {
+  return createImportFileResult({
+    sourceType,
+    errors: ['Excelファイルの形式を確認してください。XLSX形式で保存して再度アップロードしてください。'],
+  });
+}
+
+function xmlDecode(value) {
+  return String(value ?? '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function getXmlAttribute(tag, name) {
+  const match = String(tag || '').match(new RegExp(`\\s${name}="([^"]*)"`));
+  return match ? xmlDecode(match[1]) : '';
+}
+
+function columnIndexFromCellRef(ref) {
+  const letters = String(ref || '').match(/^[A-Z]+/i)?.[0] || '';
+  return letters.toUpperCase().split('').reduce((sum, letter) => (sum * 26) + letter.charCodeAt(0) - 64, 0) - 1;
+}
+
+function trimEmptyTrailingCells(row) {
+  const next = [...row];
+  while (next.length && !normalize(next[next.length - 1])) next.pop();
+  return next;
+}
+
+async function inflateZipEntry(bytes, method) {
+  if (method === 0) return bytes;
+  if (method !== 8 || typeof DecompressionStream === 'undefined') {
+    throw new Error('unsupported_zip_compression');
+  }
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function unzipXlsxEntries(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let endOffset = -1;
+  for (let index = bytes.length - 22; index >= Math.max(0, bytes.length - 66000); index -= 1) {
+    if (view.getUint32(index, true) === 0x06054b50) {
+      endOffset = index;
+      break;
+    }
+  }
+  if (endOffset < 0) throw new Error('xlsx_zip_end_not_found');
+  const totalEntries = view.getUint16(endOffset + 10, true);
+  let centralOffset = view.getUint32(endOffset + 16, true);
+  const decoder = new TextDecoder('utf-8');
+  const entries = {};
+
+  for (let entryIndex = 0; entryIndex < totalEntries; entryIndex += 1) {
+    if (view.getUint32(centralOffset, true) !== 0x02014b50) throw new Error('xlsx_central_directory_invalid');
+    const method = view.getUint16(centralOffset + 10, true);
+    const compressedSize = view.getUint32(centralOffset + 20, true);
+    const nameLength = view.getUint16(centralOffset + 28, true);
+    const extraLength = view.getUint16(centralOffset + 30, true);
+    const commentLength = view.getUint16(centralOffset + 32, true);
+    const localOffset = view.getUint32(centralOffset + 42, true);
+    const nameStart = centralOffset + 46;
+    const name = decoder.decode(bytes.slice(nameStart, nameStart + nameLength));
+    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error('xlsx_local_header_invalid');
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = bytes.slice(dataStart, dataStart + compressedSize);
+    entries[name] = decoder.decode(await inflateZipEntry(compressed, method));
+    centralOffset = nameStart + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+function parseSharedStrings(xml = '') {
+  return [...String(xml).matchAll(/<si[\s\S]*?<\/si>/g)].map(([si]) => (
+    [...si.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((match) => xmlDecode(match[1])).join('')
+  ));
+}
+
+function parseWorkbookSheets(entries) {
+  const workbook = entries['xl/workbook.xml'] || '';
+  const rels = entries['xl/_rels/workbook.xml.rels'] || '';
+  const relMap = Object.fromEntries([...rels.matchAll(/<Relationship\b[^>]*>/g)].map(([tag]) => [
+    getXmlAttribute(tag, 'Id'),
+    getXmlAttribute(tag, 'Target').replace(/^\//, ''),
+  ]));
+  return [...workbook.matchAll(/<sheet\b[^>]*>/g)].map(([tag], index) => {
+    const relId = getXmlAttribute(tag, 'r:id');
+    const target = relMap[relId] || `worksheets/sheet${index + 1}.xml`;
+    return {
+      name: getXmlAttribute(tag, 'name') || `Sheet${index + 1}`,
+      path: target.startsWith('xl/') ? target : `xl/${target}`,
+    };
+  });
+}
+
+function parseWorksheetRows(xml = '', sharedStrings = []) {
+  return [...String(xml).matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g)]
+    .map(([rowXml]) => {
+      const row = [];
+      [...rowXml.matchAll(/<c\b[^>]*>[\s\S]*?<\/c>/g)].forEach(([cellXml]) => {
+        const openTag = cellXml.match(/<c\b[^>]*>/)?.[0] || '';
+        const cellType = getXmlAttribute(openTag, 't');
+        const ref = getXmlAttribute(openTag, 'r');
+        const colIndex = Math.max(0, columnIndexFromCellRef(ref));
+        let value = '';
+        if (cellType === 's') {
+          const sharedIndex = toNumber(cellXml.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1]);
+          value = sharedStrings[sharedIndex] || '';
+        } else if (cellType === 'inlineStr') {
+          value = [...cellXml.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((match) => xmlDecode(match[1])).join('');
+        } else {
+          value = xmlDecode(cellXml.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1] || '');
+        }
+        row[colIndex] = normalize(value);
+      });
+      return trimEmptyTrailingCells(row);
+    })
+    .filter((row) => row.some((value) => normalize(value)));
+}
+
+function rowsArrayToObjects(rowArrays) {
+  const headerIndex = rowArrays.findIndex((row) => row.filter((value) => normalize(value)).length > 1 && !normalize(row[0]).startsWith('#'));
+  const headers = (rowArrays[Math.max(0, headerIndex)] || []).map((header) => normalizeHeader(header));
+  return rowArrays.slice(Math.max(0, headerIndex) + 1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ''])));
+}
+
+async function parseXlsxArrayBuffer(arrayBuffer) {
+  const entries = await unzipXlsxEntries(arrayBuffer);
+  const sharedStrings = parseSharedStrings(entries['xl/sharedStrings.xml'] || '');
+  const sheets = parseWorkbookSheets(entries);
+  const warnings = [];
+  for (const sheet of sheets.length ? sheets : [{ name: 'Sheet1', path: 'xl/worksheets/sheet1.xml' }]) {
+    const rowArrays = parseWorksheetRows(entries[sheet.path] || '', sharedStrings);
+    if (!rowArrays.length) continue;
+    return createImportFileResult({ rows: rowsArrayToObjects(rowArrays), sourceType: 'xlsx', sheetName: sheet.name, warnings });
+  }
+  return createImportFileResult({ sourceType: 'xlsx', warnings, errors: ['Excelファイルに読み込めるシートがありません。'] });
+}
+
+function readImportFile(file, options = {}, callback = () => {}) {
+  if (!file) return callback(createImportFileResult({ errors: ['ファイルを選択してください。'] }));
+  if (isXlsFile(file)) return callback(excelFormatErrorResult('xls'));
+  if (isXlsxFile(file)) {
+    return readFileAsArrayBuffer(file, (arrayBuffer) => {
+      parseXlsxArrayBuffer(arrayBuffer)
+        .then(callback)
+        .catch(() => callback(excelFormatErrorResult('xlsx')));
+    }, (message) => callback(createImportFileResult({ sourceType: 'xlsx', errors: [message] })));
+  }
+  return readFileAsText(file, (text) => callback(createImportFileResult({ rows: parseCsv(text), sourceType: 'csv', sheetName: '', warnings: [], errors: [] })));
+}
+
 function normalizeMatrixView(view) {
   if (!view || typeof view !== 'object') return null;
   const zoneHeaders = Array.isArray(view.zoneHeaders) ? view.zoneHeaders.map((zone) => compactText(zone)).filter(Boolean) : [];
@@ -202,7 +772,7 @@ function normalizeMatrixView(view) {
     zoneHeaders,
     rows: Array.isArray(view.rows) ? view.rows.map((row) => ({
       size: normalizeSize(row?.size),
-      weight: normalize(row?.weight) ? String(toNumber(row?.weight)) : '',
+      weight: normalize(row?.weight) ? parseWeightLimitValue(row?.weight) : '',
       fares: Object.fromEntries(zoneHeaders.map((zone) => [zone, normalize(row?.fares?.[zone]) ? String(toNumber(row?.fares?.[zone])) : ''])),
     })).filter((row) => row.size || row.weight || Object.values(row.fares).some((fare) => toNumber(fare) > 0)) : [],
   };
@@ -258,14 +828,14 @@ const standardOrderFields = ['orderNo', 'customer', 'address', 'sku', 'quantity'
 const platformFieldMappings = {
   'ShipNavi標準': {
     requiredSignals: ['orderno', 'customer', 'address', 'sku', 'quantity'],
-    optionalSignals: ['postal', 'sourceplatform'],
+    optionalSignals: ['postal', 'sourceplatform', '注文番号', '顧客名', '郵便番号', '配送先住所', '数量'],
     fieldCandidates: {
-      orderNo: ['orderNo'],
-      customer: ['customer'],
-      postal: ['postal'],
-      address: ['address'],
-      sku: ['sku'],
-      quantity: ['quantity'],
+      orderNo: ['orderNo', '注文番号'],
+      customer: ['customer', '顧客名'],
+      postal: ['postal', '郵便番号'],
+      address: ['address', '配送先住所'],
+      sku: ['sku', 'SKU'],
+      quantity: ['quantity', '数量'],
     },
   },
   '楽天': {
@@ -366,6 +936,36 @@ const platformFieldMappings = {
       quantity: ['数量'],
     },
   },
+  STORES: {
+    requiredSignals: ['オーダー番号', '数量'],
+    optionalSignals: ['購入者名', '郵便番号', '都道府県', '市区町村', '住所1', '品番', '品番候補'],
+    fieldCandidates: {
+      orderNo: ['オーダー番号'],
+      customer: ['購入者名'],
+      postal: ['郵便番号'],
+      address: [
+        { fields: ['都道府県', '市区町村', '住所1'], join: '' },
+        { fields: ['都道府県', '市区町村'], join: '' },
+        '住所1',
+      ],
+      sku: ['品番', '品番候補'],
+      productName: ['商品名'],
+      quantity: ['数量'],
+    },
+  },
+  'メルカリShops': {
+    requiredSignals: ['取引id', '数量'],
+    optionalSignals: ['お届け先氏名', '郵便番号', 'お届け先住所', '商品コード', '商品コード候補'],
+    fieldCandidates: {
+      orderNo: ['取引ID'],
+      customer: ['お届け先氏名'],
+      postal: ['郵便番号'],
+      address: ['お届け先住所'],
+      sku: ['商品コード', '商品コード候補'],
+      productName: ['商品名'],
+      quantity: ['数量'],
+    },
+  },
 };
 
 function hasResolvableField(headers, candidates) {
@@ -432,13 +1032,19 @@ function normalizePlatformOrderRow(row, platform) {
   const address = compactText(resolveField(row, mapping?.fieldCandidates?.address || []));
   let sku = resolveField(row, mapping?.fieldCandidates?.sku || []);
   const productName = resolveField(row, mapping?.fieldCandidates?.productName || []);
+  const rawQuantity = resolveField(row, mapping?.fieldCandidates?.quantity || []);
+  const numericQuantity = toNumber(rawQuantity);
   const warnings = [];
 
   if (!postal) warnings.push('郵便番号未設定');
+  if (postal && !isValidPostalFormat(postal)) warnings.push('郵便番号形式不正');
+  if (postal && isValidPostalFormat(postal) && getZoneByPostal(postal, address) === 'unknown') warnings.push('配送地域未判定');
   if (!sku && productName) {
     sku = productName;
     warnings.push('商品名をSKUとして使用');
   }
+  if (!normalize(rawQuantity)) warnings.push('数量未設定');
+  else if (!numericQuantity) warnings.push('数量形式不正');
 
   return {
     id: makeId('o'),
@@ -447,7 +1053,7 @@ function normalizePlatformOrderRow(row, platform) {
     postal,
     address,
     sku,
-    quantity: String(Math.max(1, toNumber(resolveField(row, mapping?.fieldCandidates?.quantity || [])) || 1)),
+    quantity: String(Math.max(1, numericQuantity || 1)),
     sourcePlatform: platform,
     warnings,
   };
@@ -470,6 +1076,7 @@ function importOrderCsvRows(rows) {
       warningDetails: [],
       missingHeaders: [],
       detectedHeaders: headers,
+      allOrders: [],
     };
   }
   const missingHeaders = getPlatformMissingHeaders(headers, platform);
@@ -483,6 +1090,7 @@ function importOrderCsvRows(rows) {
       warningDetails: [],
       missingHeaders,
       detectedHeaders: headers,
+      allOrders: [],
     };
   }
   const normalizedOrders = rows.map((row) => normalizePlatformOrderRow(row, platform));
@@ -497,6 +1105,7 @@ function importOrderCsvRows(rows) {
     warningDetails,
     missingHeaders: [],
     detectedHeaders: headers,
+    allOrders: normalizedOrders,
   };
 }
 
@@ -527,24 +1136,41 @@ function normalizeOrder(row) {
 }
 
 const productFieldCandidates = {
-  sku: ['sku', 'SKU', '商品番号', '商品コード', '商品管理番号', '品番', '商品ID', '型番'],
-  name: ['name', '商品名', '商品名称', 'product-name', 'Product Name', '品名'],
-  size: ['size', 'サイズ', '配送サイズ', '三辺合計', '総長', '梱包サイズ'],
-  weight: ['weight', '重量', '重量(g)', '重量kg', '商品重量', '梱包重量'],
-  length: ['length', '長さ', '縦', '奥行', '梱包長さ'],
-  width: ['width', '幅', '横', '梱包幅'],
-  height: ['height', '高さ', '厚さ', '梱包高さ'],
-  bundleable: ['bundleable', '同梱可', '同梱', '同梱区分'],
+  sku: ['sku', 'SKU', '商品コード', '商品管理番号', '品番', '商品ID', '管理番号', '商品番号', '型番'],
+  name: ['商品名', 'name', 'title', 'item_name', '商品名称', 'product-name', 'Product Name', '品名'],
+  size: ['size', 'サイズ', '箱サイズ', '配送サイズ', 'package_size', '梱包サイズ', '入力サイズ'],
+  weight: ['重量', 'weight', '重量kg', '重量(g)', 'weight_kg', 'item_weight', '商品重量', '梱包重量'],
+  length: ['長さ', 'length', '奥行き', '奥行', '縦', '梱包長さ'],
+  width: ['幅', 'width', '横', '梱包幅'],
+  height: ['高さ', 'height', '厚さ', '梱包高さ'],
+  totalSize: ['三辺', '三辺合計', '総長'],
+  bundleable: ['bundleEligible', 'bundleable', '同梱', '同梱可', '同梱区分', '同梱可否'],
 };
 
 function parseProductWeight(header, value) {
   const normalizedValue = normalize(value);
-  if (!normalizedValue) return '';
+  if (!normalizedValue) return { value: '', unitMismatch: false };
   const normalizedHeader = normalizeHeader(header);
   const numeric = toNumber(normalizedValue);
-  if (!numeric) return '';
-  if (normalizedHeader.includes('kg') && !normalizedHeader.includes('(g)')) return String(Math.round(numeric * 1000));
-  return String(numeric);
+  if (!numeric) return { value: '', unitMismatch: true };
+  const valueText = normalizedValue.toLowerCase();
+  const isKg = normalizedHeader.includes('kg') || /kg|キロ/.test(valueText);
+  return { value: String(Math.round(isKg ? numeric * 1000 : numeric)), unitMismatch: false };
+}
+
+function parseProductDimension(header, value) {
+  const normalizedValue = normalize(value);
+  if (!normalizedValue) return { value: '', unitMismatch: false, sourceUnit: '' };
+  const numeric = toNumber(normalizedValue);
+  if (!numeric) return { value: '', unitMismatch: true, sourceUnit: 'unknown' };
+  const text = `${normalizeHeader(header)} ${normalizedValue}`.toLowerCase();
+  const isMm = /mm|㎜|ミリ/.test(text);
+  const isCm = /cm|センチ/.test(text);
+  return {
+    value: String(isMm ? numeric / 10 : numeric),
+    unitMismatch: !isMm && !isCm && /[^0-9.,\s-]/.test(normalizedValue),
+    sourceUnit: isMm ? 'mm' : (isCm ? 'cm' : 'cm_assumed'),
+  };
 }
 
 function detectProductFieldMapping(headers) {
@@ -564,22 +1190,66 @@ function detectProductImportCapability(headers, mapping) {
   };
 }
 
+function productRowIssue(type, field, message, extra = {}) {
+  return { type, field, message, ...extra };
+}
+
 function normalizeProductImportRow(row, mapping) {
   const name = compactText(resolveField(row, mapping.name ? [mapping.name] : []));
   let sku = compactText(resolveField(row, mapping.sku ? [mapping.sku] : []));
   const rawSize = normalizeSize(resolveField(row, mapping.size ? [mapping.size] : []));
-  const length = String(toNumber(resolveField(row, mapping.length ? [mapping.length] : [])));
-  const width = String(toNumber(resolveField(row, mapping.width ? [mapping.width] : [])));
-  const height = String(toNumber(resolveField(row, mapping.height ? [mapping.height] : [])));
-  const computedSize = rawSize || sizeFromTotal(toNumber(length) + toNumber(width) + toNumber(height)) || '';
+  const totalSizeRaw = resolveField(row, mapping.totalSize ? [mapping.totalSize] : []);
+  const lengthValue = parseProductDimension(mapping.length || '', resolveField(row, mapping.length ? [mapping.length] : []));
+  const widthValue = parseProductDimension(mapping.width || '', resolveField(row, mapping.width ? [mapping.width] : []));
+  const heightValue = parseProductDimension(mapping.height || '', resolveField(row, mapping.height ? [mapping.height] : []));
+  const totalSizeValue = parseProductDimension(mapping.totalSize || '', totalSizeRaw);
+  const length = lengthValue.value;
+  const width = widthValue.value;
+  const height = heightValue.value;
+  const dimensionTotal = toNumber(length) + toNumber(width) + toNumber(height);
+  const inferredTotal = dimensionTotal > 0 ? dimensionTotal : toNumber(totalSizeValue.value);
+  const inferredSize = inferredTotal > 0 ? sizeFromTotal(inferredTotal) : null;
+  const computedSize = inferredSize || rawSize || '';
   const rawWeightField = mapping.weight || '';
-  const weight = parseProductWeight(rawWeightField, resolveField(row, rawWeightField ? [rawWeightField] : []));
+  const weightResult = parseProductWeight(rawWeightField, resolveField(row, rawWeightField ? [rawWeightField] : []));
+  const weight = weightResult.value;
   const warnings = [];
+  const importIssues = [];
+
   if (!sku && name) {
     sku = name;
     warnings.push('商品名をSKUとして使用');
+    importIssues.push(productRowIssue('missing_sku', 'sku', '商品コードが見つかりません。商品名を SKU として扱いました。', {
+      detectedColumn: mapping.name || '商品名',
+      suggestion: makeImportSuggestion('missing_sku', {
+        sourceField: mapping.name || '商品名',
+        detectedColumn: mapping.name || '商品名',
+        suggestedField: 'SKU',
+        suggestedValue: sku,
+        confidence: 0.75,
+        reason: '商品名をSKUとして利用しています。',
+      }),
+    }));
   }
-  if (!weight) warnings.push('重量未設定');
+  if (!weight) {
+    warnings.push('重量未設定');
+    importIssues.push(productRowIssue('missing_weight', 'weight', '重量が見つかりません。', { detectedColumn: mapping.weight || '' }));
+  }
+  if (weightResult.unitMismatch || [lengthValue, widthValue, heightValue, totalSizeValue].some((item) => item.unitMismatch)) {
+    warnings.push('単位確認が必要');
+    importIssues.push(productRowIssue('unit_mismatch', 'unit', 'サイズ単位を確認してください。'));
+  }
+  if (inferredSize) {
+    warnings.push('三辺合計から配送サイズを自動判定');
+  }
+  if (rawSize && inferredSize && String(rawSize) !== String(inferredSize)) {
+    warnings.push('入力サイズと自動判定サイズが不一致');
+    importIssues.push(productRowIssue('size_mismatch', 'size', '入力サイズと自動判定サイズが一致しません。'));
+  }
+  if (inferredTotal > 160) {
+    warnings.push('三辺サイズが160サイズ超過');
+    importIssues.push(productRowIssue('oversized_size', 'size', '三辺サイズが160サイズを超えています。'));
+  }
 
   return {
     id: makeId('p'),
@@ -590,8 +1260,9 @@ function normalizeProductImportRow(row, mapping) {
     length,
     width,
     height,
-    bundleable: mapping.bundleable ? !['false', '0', 'no', 'n', '不可'].includes(normalize(resolveField(row, [mapping.bundleable])).toLowerCase()) : true,
+    bundleable: mapping.bundleable ? !['false', '0', 'no', 'n', '不可', '不可同梱'].includes(normalize(resolveField(row, [mapping.bundleable])).toLowerCase()) : true,
     warnings,
+    importIssues,
   };
 }
 
@@ -606,7 +1277,10 @@ function importProductCsvRows(rows) {
       failureCount: rows.length,
       warningCount: 0,
       warningDetails: [],
-      message: '商品CSVとして認識できません',
+      message: '商品マスタとして認識できません',
+      mapping,
+      detectedHeaders: headers,
+      normalizedProducts: [],
     };
   }
   if (!capability.hasIdentity) {
@@ -617,12 +1291,15 @@ function importProductCsvRows(rows) {
       warningCount: 0,
       warningDetails: [],
       message: '必要な商品識別項目が見つかりません',
+      mapping,
+      detectedHeaders: headers,
+      normalizedProducts: [],
     };
   }
   const normalizedProducts = rows.map((row) => normalizeProductImportRow(row, mapping));
   const validProducts = normalizedProducts
     .filter((product) => normalize(product.sku) || normalize(product.name))
-    .map((product) => ({ ...normalizeProduct(product), warnings: product.warnings || [] }));
+    .map((product) => ({ ...normalizeProduct(product), warnings: product.warnings || [], importIssues: product.importIssues || [] }));
   const warningDetails = [...new Set(validProducts.flatMap((product) => product.warnings || []))];
   return {
     products: validProducts,
@@ -631,7 +1308,217 @@ function importProductCsvRows(rows) {
     warningCount: validProducts.reduce((sum, product) => sum + (product.warnings?.length || 0), 0),
     warningDetails,
     message: '',
+    mapping,
+    detectedHeaders: headers,
+    normalizedProducts,
   };
+}
+
+function recordProductImportIssues(importResult, sourceFileName = '', rows = []) {
+  if (!importResult) return [];
+  const issues = [];
+  const products = Array.isArray(importResult.products) ? importResult.products : [];
+  products.forEach((product, index) => {
+    const rowNumber = index + 2;
+    (product.importIssues || []).forEach((issue) => {
+      issues.push(appendImportIssue({
+        type: issue.type,
+        sourceFlow: 'product_import',
+        sourceFileName,
+        rowNumber,
+        field: issue.field,
+        detectedColumn: issue.detectedColumn || '',
+        message: issue.message,
+        suggestion: issue.suggestion || null,
+      }));
+    });
+  });
+
+  const headers = importResult.detectedHeaders || Object.keys(rows[0] || {});
+  const hasBundleEligibleHeader = headers.some((header) => ['bundleeligible', 'bundle eligible'].includes(normalizeHeader(header)));
+  if (hasBundleEligibleHeader) {
+    issues.push(appendImportIssue({
+      type: 'bundle_field_mapping',
+      sourceFlow: 'product_import',
+      sourceFileName,
+      field: 'bundleable',
+      detectedColumn: 'bundleEligible',
+      message: 'bundleEligible 列を同梱可否として扱いました。',
+      suggestion: makeImportSuggestion('bundle_field_mapping', {
+        sourceField: 'bundleEligible',
+        detectedColumn: 'bundleEligible',
+        suggestedField: 'bundleable',
+        confidence: 0.9,
+        reason: 'bundleEligible は同梱可否として利用できる可能性が高いです。',
+      }),
+    }));
+  }
+  const recognizedHeaders = Object.values(importResult.mapping || {}).filter(Boolean).map((header) => normalizeHeader(header));
+  headers.filter((header) => normalize(header) && !recognizedHeaders.includes(normalizeHeader(header))).forEach((header) => {
+    issues.push(appendImportIssue({
+      type: 'column_name_mismatch',
+      sourceFlow: 'product_import',
+      sourceFileName,
+      field: header,
+      detectedColumn: header,
+      message: '列名を確認してください。商品マスタの項目として自動判定できませんでした。',
+    }));
+  });
+  return issues;
+}
+
+
+function recordOrderImportIssues(importResult, sourceFileName = '') {
+  if (!importResult) return [];
+  const issues = [];
+  const knownHeaders = importResult.platform && platformFieldMappings[importResult.platform]
+    ? Object.values(platformFieldMappings[importResult.platform].fieldCandidates || {}).flatMap((candidates) => (candidates || []).flatMap((candidate) => fieldCandidate(candidate).fields).map(normalizeHeader))
+    : [];
+  if (importResult.platform === 'unknown') {
+    issues.push(appendImportIssue({
+      type: 'platform_mapping_warning',
+      sourceFlow: 'order_import',
+      sourceFileName,
+      field: 'headers',
+      message: '列名を確認してください。取込元プラットフォームを判定できません。',
+    }));
+  }
+  (importResult.missingHeaders || []).forEach((header) => {
+    issues.push(appendImportIssue({
+      type: 'platform_mapping_warning',
+      sourceFlow: 'order_import',
+      sourceFileName,
+      sourcePlatform: importResult.platform,
+      field: header,
+      detectedColumn: header,
+      message: '列名を確認してください。プラットフォーム項目を標準項目へ対応できません。',
+      suggestion: makeImportSuggestion('platform_mapping_warning', {
+        sourceField: header,
+        detectedColumn: header,
+        suggestedField: header,
+        confidence: 0.4,
+        reason: '列名の対応候補を確認してください。',
+      }),
+    }));
+  });
+  (importResult.detectedHeaders || []).forEach((header) => {
+    const normalizedHeader = normalizeHeader(header);
+    if (!normalize(header) || knownHeaders.includes(normalizedHeader)) return;
+    issues.push(appendImportIssue({
+      type: 'column_name_mismatch',
+      sourceFlow: 'order_import',
+      sourceFileName,
+      sourcePlatform: importResult.platform,
+      field: header,
+      detectedColumn: header,
+      message: '列名を確認してください。注文データの項目として自動判定できませんでした。',
+    }));
+  });
+  (importResult.allOrders || importResult.orders || []).forEach((order, index) => {
+    const rowNumber = index + 2;
+    if ((order.warnings || []).includes('商品名をSKUとして使用')) {
+      issues.push(appendImportIssue({
+        type: 'missing_sku',
+        sourceFlow: 'order_import',
+        sourceFileName,
+        sourcePlatform: order.sourcePlatform,
+        rowNumber,
+        field: 'sku',
+        detectedColumn: '商品名',
+        message: '商品コードが見つかりません。商品名を SKU として扱いました。',
+        suggestion: makeImportSuggestion('missing_sku', {
+          sourceField: '商品名',
+          detectedColumn: '商品名',
+          suggestedField: 'SKU',
+          suggestedValue: order.sku,
+          confidence: 0.75,
+          reason: '商品名をSKUとして利用しています。',
+        }),
+      }));
+    }
+    if ((order.warnings || []).includes('郵便番号未設定') || !normalizePostal(order.postal)) {
+      issues.push(appendImportIssue({ type: 'missing_postal', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'postal', message: '郵便番号が見つかりません。' }));
+    } else if ((order.warnings || []).includes('郵便番号形式不正') || !isValidPostalFormat(order.postal)) {
+      issues.push(appendImportIssue({ type: 'invalid_postal', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'postal', message: '郵便番号の形式が正しくありません。' }));
+    } else if ((order.warnings || []).includes('配送地域未判定')) {
+      issues.push(appendImportIssue({ type: 'unknown_zone', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'postal', message: '配送地域を判定できません。' }));
+    }
+    if ((order.warnings || []).includes('数量未設定')) {
+      issues.push(appendImportIssue({ type: 'missing_quantity', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'quantity', message: '数量が見つかりません。' }));
+    }
+    if ((order.warnings || []).includes('数量形式不正')) {
+      issues.push(appendImportIssue({ type: 'invalid_quantity', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'quantity', message: '数量の形式が正しくありません。' }));
+    }
+  });
+  return issues;
+}
+
+function recordFareImportIssues(rows, fareFormat, matrixView, normalizedRows, sourceFileName = '') {
+  const issues = [];
+  const headers = Object.keys(rows[0] || {});
+  const normalizedHeaders = headers.map((header) => normalizeHeader(header));
+  const zoneSignals = ['北海道', '東北', '東京', '東京都', '関東', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
+  const knownMatrixHeaders = ['size', 'サイズ', 'サイズ(cm)', 'サイズ(mm)', '総長', '重量', '重量kg', '重量(kg)', 'weight', 'weightlimit'];
+  const knownVerticalHeaders = ['carrier', '配送会社', 'service', 'サービス', 'size', 'サイズ', 'zone', '地域', '配送地域', 'fare', '運賃', '送料', 'weightlimit', '重量', '重量kg'];
+  const hasZoneColumn = normalizedHeaders.some((header) => ['zone', '地域', '配送地域', '地区'].includes(header) || zoneSignals.includes(header)) || Boolean(matrixView?.zoneHeaders?.length);
+  if (!hasZoneColumn) {
+    issues.push(appendImportIssue({
+      type: 'missing_zone_column',
+      sourceFlow: 'fare_import',
+      sourceFileName,
+      field: 'zone',
+      message: '配送地域の列が見つかりません。列名を確認してください。',
+    }));
+  }
+  if (fareFormat === 'unknown' || !normalizedRows?.length) {
+    issues.push(appendImportIssue({
+      type: 'fare_matrix_parse_failed',
+      sourceFlow: 'fare_import',
+      sourceFileName,
+      field: 'headers',
+      message: '送料マトリクスとして認識できません。列名を確認してください。',
+    }));
+  }
+  headers.forEach((header) => {
+    const normalizedHeader = normalizeHeader(header);
+    const isKnown = knownMatrixHeaders.includes(normalizedHeader) || knownVerticalHeaders.includes(normalizedHeader) || zoneSignals.includes(normalizedHeader);
+    if (!isKnown && normalize(header)) {
+      issues.push(appendImportIssue({
+        type: 'column_name_mismatch',
+        sourceFlow: 'fare_import',
+        sourceFileName,
+        field: header,
+        detectedColumn: header,
+        message: '列名を確認してください。運賃表の項目として自動判定できませんでした。',
+      }));
+    }
+  });
+  const sizeHeader = headers[0] || 'size';
+  const weightHeader = headers.find((header) => ['weight', '重量', '重量(kg)', '重量kg', 'weightlimit'].includes(normalizeHeader(header))) || 'weightLimit';
+  (rows || []).forEach((row, index) => {
+    const rowNumber = index + 2;
+    const sizeValue = normalize(row[sizeHeader] ?? row.size);
+    const weightValue = normalize(row[weightHeader] ?? row.weight ?? row.weightLimit);
+    if (!sizeValue) {
+      issues.push(appendImportIssue({ type: 'missing_size', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'size', message: 'サイズが見つかりません。' }));
+    }
+    if (/mm|㎜|ミリ/i.test(`${matrixView?.sizeLabel || sizeHeader} ${sizeValue}`)) {
+      issues.push(appendImportIssue({ type: 'unit_mismatch', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'size', message: 'サイズ単位を確認してください。cm単位のサイズとして取り込んでください。' }));
+    }
+    const fares = headers
+      .filter((header) => !['carrier', 'service', 'size', 'サイズ', 'サイズ(mm)', 'サイズ(cm)', 'zone', '地域', '配送地域', 'weight', '重量', '重量(kg)', '重量kg', 'weightlimit'].includes(normalizeHeader(header)))
+      .map((header) => [header, row[header]]);
+    fares.forEach(([zone, fare]) => {
+      if (!normalize(fare) || toNumber(fare) <= 0) {
+        issues.push(appendImportIssue({ type: 'missing_fare', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: zone || 'fare', message: '運賃が見つかりません。' }));
+      }
+    });
+    if (weightValue && !/^[0-9.,]+$/.test(weightValue)) {
+      issues.push(appendImportIssue({ type: 'invalid_weight_limit', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'weightLimit', message: '重量上限の形式を確認してください。' }));
+      issues.push(appendImportIssue({ type: 'unit_mismatch', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'weightLimit', message: '重量単位を確認してください。' }));
+    }
+  });
+  return issues;
 }
 
 function normalizeProduct(row) {
@@ -654,7 +1541,7 @@ function normalizeFare(row) {
     carrier: normalizeCarrier(row.carrier),
     service: normalize(row.service),
     size: normalizeSize(row.size),
-    weightLimit: String(toNumber(row.weightLimit || row.weight)),
+    weightLimit: parseWeightLimitValue(row.weightLimit || row.weight) || '0',
     zone: normalize(row.zone) || 'default',
     fare: String(toNumber(row.fare)),
   };
@@ -664,7 +1551,7 @@ function createMatrixView(rows, carrierName = 'ヤマト', serviceName = '宅急
   if (!rows.length) return null;
   const headers = Object.keys(rows[0] || {}).map((header) => normalizeHeader(header));
   const sizeHeader = headers[0];
-  const weightHeader = headers.find((header) => ['weight', '重量', '重量(kg)'].includes(header));
+  const weightHeader = headers.find((header) => ['weight', '重量', '重量(kg)', '重量kg', 'weightlimit'].includes(header));
   const zoneHeaders = headers.filter((header) => header !== sizeHeader && header !== weightHeader);
   return normalizeMatrixView({
     carrier: carrierName,
@@ -682,10 +1569,10 @@ function createMatrixView(rows, carrierName = 'ヤマト', serviceName = '宅急
 
 function detectFareTableFormat(headers, rows) {
   const normalizedHeaders = headers.map((header) => normalizeHeader(header));
-  if (hasHeaders(normalizedHeaders, ['carrier', 'service', 'size', 'zone', 'fare'])) return 'vertical';
+  if (hasHeaders(normalizedHeaders, ['carrier', 'service', 'size', 'zone', 'fare']) || hasHeaders(normalizedHeaders, ['配送会社', 'サービス', 'サイズ', '地域', '送料'])) return 'vertical';
   const firstHeader = normalizedHeaders[0];
   const zoneSignals = ['北海道', '関東', '東京', '関西', '沖縄', '九州'];
-  if (['size', 'サイズ', '総長', 'サイズ(cm)'].includes(firstHeader) && normalizedHeaders.some((header) => zoneSignals.includes(header))) return 'matrix';
+  if ((['size', 'サイズ', '総長', 'サイズ(cm)', 'サイズ(mm)'].includes(firstHeader) || firstHeader.includes('サイズ')) && normalizedHeaders.some((header) => zoneSignals.includes(header))) return 'matrix';
   return 'unknown';
 }
 
@@ -719,7 +1606,7 @@ function getDataHealth() {
     hasProducts: products.length > 0,
     hasFares: fares.length > 0,
     errors: [
-      products.length ? '' : '商品主档がありません。商品CSVを先に取り込んでください。',
+      products.length ? '' : '商品マスタがありません。商品CSVを先に取り込んでください。',
       fares.length ? '' : '運賃表がありません。運賃表CSVを先に取り込んでください。',
     ].filter(Boolean),
   };
@@ -907,7 +1794,7 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
     postal: orders[0]?.postal || '',
     address: orders[0]?.address || '',
     sourcePlatform: [...new Set(orders.map((order) => order.sourcePlatform).filter(Boolean))].join(', '),
-    items: Object.entries(itemMap).map(([sku, quantity]) => `${sku} x ${quantity}`).join(', '),
+    items: Object.entries(itemMap).map(([sku, quantity]) => `${sku} × ${quantity}`).join(', '),
     estimatedSize: estimatedSize || '',
     totalWeight,
     recommendedCarrier: best?.carrier || '',
@@ -957,13 +1844,13 @@ function renderDashboard() {
     </section>
     ${notices}
     <section class="panel full-width">
-      <h2>Phase 2 MVP</h2>
-      <p>注文CSV、商品主档、運賃表をLocalStorageに保存し、同梱候補と最低運賃を自動計算します。</p>
+      <h2>初期機能</h2>
+      <p>注文CSV、商品マスタ、運賃表をブラウザに保存し、同梱候補と最低運賃を自動計算します。</p>
       <div class="action-grid">
         <a class="action-card" href="orders.html"><b>注文CSV</b><span>orderNo, customer, postal, address, sku, quantity</span></a>
-        <a class="action-card" href="products.html"><b>商品主档</b><span>sku, name, size, weight, length, width, height, bundleable</span></a>
+        <a class="action-card" href="products.html"><b>商品マスタ</b><span>sku, name, size, weight, length, width, height, bundleable</span></a>
         <a class="action-card" href="carriers.html"><b>運賃表</b><span>carrier, service, size, zone, fare</span></a>
-        <a class="action-card" href="results.html"><b>結果中心</b><span>推薦配送方式とCSV出力</span></a>
+        <a class="action-card" href="results.html"><b>結果センター</b><span>推奨配送方法とCSV出力</span></a>
       </div>
     </section>
   `;
@@ -977,7 +1864,7 @@ function renderProducts(filter = '') {
   tbody.innerHTML = products.map((product) => `
     <tr>
       <td>${escapeHtml(product.sku)}</td><td>${escapeHtml(product.name)}</td><td><span class="badge">${escapeHtml(product.size)}</span></td>
-      <td>${escapeHtml(product.weight)}g</td><td>${product.bundleable ? '可同梱' : '不可同梱'} / ${escapeHtml(product.length)}x${escapeHtml(product.width)}x${escapeHtml(product.height)}cm</td>
+      <td>${escapeHtml(product.weight)}g</td><td>${product.bundleable ? '可同梱' : '不可同梱'} / ${escapeHtml(product.length)}×${escapeHtml(product.width)}×${escapeHtml(product.height)}cm</td>
       <td><div class="row-actions"><button class="small-button" data-edit-product="${product.id}">編集</button><button class="small-button danger" data-delete-product="${product.id}">削除</button></div></td>
     </tr>
   `).join('') || '<tr><td colspan="6">商品データがありません。</td></tr>';
@@ -990,6 +1877,18 @@ function setProductImportSummary(message) {
   if (!summary) {
     summary = document.createElement('p');
     summary.id = 'product-import-summary';
+    form.insertAdjacentElement('afterend', summary);
+  }
+  summary.textContent = message;
+}
+
+function setFareImportSummary(message) {
+  const form = document.querySelector('#fare-import-form');
+  if (!form) return;
+  let summary = document.querySelector('#fare-import-summary');
+  if (!summary) {
+    summary = document.createElement('p');
+    summary.id = 'fare-import-summary';
     form.insertAdjacentElement('afterend', summary);
   }
   summary.textContent = message;
@@ -1009,7 +1908,7 @@ function initProducts() {
     setData('products', formData.id ? products.map((item) => item.id === formData.id ? { ...product, id: formData.id } : item) : [{ ...product, id: makeId('p') }, ...products]);
     form.reset();
     renderProducts(search?.value || '');
-    showToast('商品主档を保存しました。');
+    showToast('商品マスタを保存しました。');
   });
   document.addEventListener('click', (event) => {
     const editId = event.target.dataset?.editProduct;
@@ -1027,29 +1926,47 @@ function initProducts() {
   document.querySelector('#product-import-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const file = event.currentTarget.elements.file.files[0];
-    if (!file) return showToast('商品CSVを選択してください。');
-    if (isExcelFile(file)) {
-      const message = 'Excel形式は現在CSV変換が必要です。CSVで保存してからアップロードしてください。';
-      setProductImportSummary(message);
-      return showToast(message);
-    }
+    if (!file) return showToast('商品マスタファイルを選択してください。');
     if (isImageFile(file)) {
-      const message = '画像OCRには対応していません。CSVまたはExcelをアップロードしてください。';
+      const message = '画像読み取りには対応していません。CSVまたはExcelをアップロードしてください。';
       setProductImportSummary(message);
       return showToast(message);
     }
-    readFileAsText(file, (text) => {
-      const rows = parseCsv(text);
+    readImportFile(file, { flow: 'product_import' }, (fileResult) => {
+      if (fileResult.errors?.length) {
+        const message = fileResult.errors.join(' ');
+        setProductImportSummary(message);
+        appendImportIssue({
+          type: 'product_file_read_error',
+          sourceFlow: 'product_import',
+          sourceFileName: file.name,
+          field: 'file',
+          message,
+        });
+        return showToast(message);
+      }
+      const rows = fileResult.rows || [];
       const importResult = importProductCsvRows(rows);
       if (importResult.message) {
+        appendImportIssue({
+          type: 'product_mapping_warning',
+          sourceFlow: 'product_import',
+          sourceFileName: file.name,
+          field: 'headers',
+          message: `列名を確認してください。${importResult.message}`,
+        });
         setProductImportSummary(importResult.message);
         return showToast(importResult.message);
       }
-      const imported = importResult.products;
+      recordProductImportIssues(importResult, file.name, rows);
+      const imported = importResult.products.map(({ importIssues, ...product }) => product);
       setData('products', [...imported, ...getData('products')]);
       renderProducts(search?.value || '');
       const warningText = (importResult.warningDetails || []).join('、') || 'なし';
-      const message = `商品数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount} / 警告内容: ${warningText}`;
+      const fileType = (fileResult.sourceType || 'csv').toUpperCase();
+      const sheetText = fileResult.sheetName ? ` / シート名: ${fileResult.sheetName}` : '';
+      const unresolvedCount = getOpenImportIssues().length;
+      const message = `取込ファイル種別: ${fileType}${sheetText} / 商品数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount} / 未解決問題数: ${unresolvedCount} / 警告内容: ${warningText}`;
       setProductImportSummary(message);
       showToast(message);
     });
@@ -1144,15 +2061,21 @@ function initCarriers() {
     setFareTableState(nextMatrix, normalizedFareRows);
     setData('carriers', normalizedFareRows);
     renderCarriers(search?.value || '');
-    showToast('矩陣運賃表を保存しました。');
+    showToast('マトリクス運賃表を保存しました。');
   });
   document.querySelector('#fare-import-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const file = event.currentTarget.elements.file.files[0];
-    if (!file) return showToast('運賃表CSVを選択してください。');
-    if (isImageFile(file)) return showToast('画像OCRには対応していません。CSVまたはExcelをアップロードしてください。');
-    readFileAsText(file, (text) => {
-      const rows = parseCsv(text);
+    if (!file) return showToast('運賃表ファイルを選択してください。');
+    if (isImageFile(file)) return showToast('画像ではなく、CSV または Excel ファイルをアップロードしてください。');
+    readImportFile(file, { flow: 'fare_import' }, (fileResult) => {
+      if (fileResult.errors?.length) {
+        const message = fileResult.errors.join(' ');
+        setFareImportSummary(message);
+        appendImportIssue({ type: 'fare_file_read_error', sourceFlow: 'fare_import', sourceFileName: file.name, field: 'file', message });
+        return showToast(message);
+      }
+      const rows = fileResult.rows || [];
       const headers = Object.keys(rows[0] || {});
       const carrierName = normalizeCarrier(form?.elements?.name?.value || form?.elements?.carrier?.value || 'ヤマト');
       const serviceName = normalize(form?.elements?.service?.value || '宅急便');
@@ -1166,12 +2089,22 @@ function initCarriers() {
         matrixView = createMatrixView(rows, carrierName, serviceName);
       } else {
         const missing = requireColumns(rows, ['carrier', 'service', 'size', 'zone', 'fare']);
-        return showToast(`不足字段: ${missing.join(', ')}`);
+        recordFareImportIssues(rows, fareFormat, matrixView, imported, file.name);
+        const message = `不足している項目: ${missing.join(', ')}`;
+        setFareImportSummary(message);
+        return showToast(message);
       }
+      const issues = recordFareImportIssues(rows, fareFormat, matrixView, imported, file.name);
       setFareTableState(matrixView, imported);
       setData('carriers', imported);
       renderCarriers(search?.value || '');
-      showToast(`${imported.length}行の運賃表を保存しました。`);
+      const fileType = (fileResult.sourceType || 'csv').toUpperCase();
+      const sheetText = fileResult.sheetName ? ` / シート名: ${fileResult.sheetName}` : '';
+      const failureCount = Math.max(0, rows.length - imported.length);
+      const unresolvedCount = getOpenImportIssues().length;
+      const message = `取込ファイル種別: ${fileType}${sheetText} / 形式: ${fareFormat} / 成功数: ${imported.length} / 失敗数: ${failureCount} / 警告数: ${issues.length} / 未解決問題数: ${unresolvedCount}`;
+      setFareImportSummary(message);
+      showToast(message);
     });
   });
 }
@@ -1185,12 +2118,73 @@ function renderOrders(filter = '') {
   tbody.innerHTML = orders.map((order) => `
     <tr>
       <td>${escapeHtml(order.orderNo)}</td><td>${escapeHtml(order.customer)}</td><td>${escapeHtml(order.postal || '郵便番号未設定')}</td>
-      <td>${escapeHtml(order.sku)} x ${escapeHtml(order.quantity)}</td><td>${escapeHtml(order.address)}</td><td>${bundleIds.has(order.id) ? '同梱候補' : '単独'}</td>
+      <td>${escapeHtml(order.sku)} × ${escapeHtml(order.quantity)}</td><td>${escapeHtml(order.address)}</td><td>${bundleIds.has(order.id) ? '同梱候補' : '単独'}</td>
       <td><span class="badge ${bundleIds.has(order.id) ? 'green' : 'orange'}">${bundleIds.has(order.id) ? '可同梱' : '確認済'}</span></td>
     </tr>
   `).join('') || '<tr><td colspan="7">注文データがありません。</td></tr>';
   const summary = document.querySelector('#order-preview-summary');
-  if (summary) summary.textContent = `${orders.length}件の注文をLocalStorageから表示しています。`;
+  if (summary) summary.textContent = `${orders.length}件の注文をブラウザ保存データから表示しています。`;
+}
+
+function importShipNaviStandardRows(rows, headers) {
+  const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi標準' }));
+  const validOrders = orders.filter(hasStandardOrderFields);
+  return {
+    platform: 'ShipNavi標準',
+    orders: validOrders,
+    successCount: validOrders.length,
+    failureCount: orders.length - validOrders.length,
+    missingHeaders: [],
+    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    warningDetails: [...new Set(validOrders.flatMap((order) => order.warnings || []))],
+    detectedHeaders: headers,
+    allOrders: orders,
+  };
+}
+
+function handleOrderImportFile(file, search) {
+  const summary = document.querySelector('#order-preview-summary');
+  if (!file) return showToast('注文ファイルを選択してください。');
+  if (isImageFile(file)) return showToast('画像ではなく、CSV または Excel ファイルをアップロードしてください。');
+  readImportFile(file, { flow: 'order_import' }, (fileResult) => {
+    if (fileResult.errors?.length) {
+      const message = fileResult.errors.join(' ');
+      if (summary) summary.textContent = message;
+      appendImportIssue({ type: 'order_file_read_error', sourceFlow: 'order_import', sourceFileName: file.name, field: 'file', message });
+      return showToast(message);
+    }
+    const rows = fileResult.rows || [];
+    const headers = Object.keys(rows[0] || {});
+    let importResult;
+    const platform = detectOrderCsvFormat(headers);
+    if (platform !== 'unknown') {
+      importResult = importOrderCsvRows(rows);
+      if (importResult.missingHeaders.length) {
+        recordOrderImportIssues(importResult, file.name);
+        const message = `${platform} 不足している項目: ${importResult.missingHeaders.join(', ')}`;
+        if (summary) summary.textContent = message;
+        return showToast(message);
+      }
+    } else if (hasHeaders(headers, ['orderNo', 'customer', 'address', 'sku', 'quantity'])) {
+      importResult = importShipNaviStandardRows(rows, headers);
+    }
+    if (!importResult || importResult.platform === 'unknown') {
+      const detectedHeaderText = headers.length ? headers.join(', ') : 'なし';
+      recordOrderImportIssues(importResult || { platform: 'unknown', orders: [], missingHeaders: [], detectedHeaders: headers }, file.name);
+      const message = `未対応CSV形式 / ヘッダー: ${detectedHeaderText} / 後続で手動マッピング対応予定`;
+      if (summary) summary.textContent = message;
+      return showToast(message);
+    }
+    recordOrderImportIssues(importResult, file.name);
+    const imported = importResult.orders;
+    setData('orders', imported);
+    renderOrders(search?.value || '');
+    const fileType = (fileResult.sourceType || 'csv').toUpperCase();
+    const sheetText = fileResult.sheetName ? ` / シート名: ${fileResult.sheetName}` : '';
+    const message = `取込ファイル種別: ${fileType}${sheetText} / 検出プラットフォーム: ${importResult.platform} / 注文件数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0} / 未解決問題数: ${getOpenImportIssues().length}`;
+    if (summary) summary.textContent = message;
+    showToast(message);
+  });
 }
 
 function initOrders() {
@@ -1200,55 +2194,11 @@ function initOrders() {
   search?.addEventListener('input', () => renderOrders(search.value));
   document.querySelector('#order-csv-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    const file = event.currentTarget.elements.file.files[0];
-    if (!file) return showToast('\u6ce8\u6587CSV\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044\u3002');
-    if (isImageFile(file)) return showToast('画像OCRには対応していません。CSVまたはExcelをアップロードしてください。');
-    readFileAsText(file, (text) => {
-      const rows = parseCsv(text);
-      const headers = Object.keys(rows[0] || {});
-      let importResult;
-      const platform = detectOrderCsvFormat(headers);
-      if (platform !== 'unknown') {
-        importResult = importOrderCsvRows(rows);
-        if (importResult.missingHeaders.length) {
-          return showToast(`${platform} 不足字段: ${importResult.missingHeaders.join(', ')}`);
-        }
-      } else if (hasHeaders(headers, ['orderNo', 'customer', 'address', 'sku', 'quantity'])) {
-        const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi' }));
-        const validOrders = orders.filter(hasStandardOrderFields);
-        importResult = {
-          platform: 'ShipNavi',
-          orders: validOrders,
-          successCount: validOrders.length,
-          failureCount: orders.length - validOrders.length,
-          missingHeaders: [],
-          warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
-          warningDetails: [...new Set(validOrders.flatMap((order) => order.warnings || []))],
-          detectedHeaders: headers,
-        };
-      }
-      if (!importResult || importResult.platform === 'unknown') {
-        const detectedHeaderText = headers.length ? headers.join(', ') : 'なし';
-        const message = `未対応CSV形式 / headers: ${detectedHeaderText} / 後続で手動マッピング対応予定`;
-        const summary = document.querySelector('#order-preview-summary');
-        if (summary) summary.textContent = message;
-        return showToast(message);
-      }
-      const imported = importResult.orders;
-      setData('orders', imported);
-      renderOrders(search?.value || '');
-      const summary = document.querySelector('#order-preview-summary');
-      const warningText = (importResult.warningDetails || []).join('、') || 'なし';
-      const message = `${importResult.platform} CSVを取り込みました / 注文数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0} / 警告内容: ${warningText}`;
-      if (summary) summary.textContent = message;
-      showToast(message);
-    });
+    handleOrderImportFile(event.currentTarget.elements.file.files[0], search);
   });
   document.querySelector('#order-excel-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    const file = event.currentTarget.elements.file?.files?.[0];
-    if (isImageFile(file)) return showToast('画像OCRには対応していません。CSVまたはExcelをアップロードしてください。');
-    showToast('Excel取り込みは次段階対応です。現時点ではCSVをご利用ください。');
+    handleOrderImportFile(event.currentTarget.elements.file?.files?.[0], search);
   });
 }
 
@@ -1257,10 +2207,10 @@ function renderTemplates() {
   if (!target) return;
   target.outerHTML = `
     <section class="panel full-width">
-      <h2>CSV字段</h2>
-      <p>注文CSV: orderNo, customer, postal, address, sku, quantity</p>
-      <p>商品主档: sku, name, size, weight, length, width, height, bundleable</p>
-      <p>運賃表: carrier, service, size, zone, fare</p>
+      <h2>CSV項目</h2>
+      <p>注文CSV: 注文番号、顧客名、郵便番号、配送先住所、SKU、数量</p>
+      <p>商品マスタ: SKU、商品名、配送サイズ、重量、長さ、幅、高さ、同梱可否</p>
+      <p>運賃表: 配送会社、サービス、配送サイズ、配送地域、送料</p>
     </section>
   `;
 }
@@ -1297,44 +2247,53 @@ function renderResults() {
         <td><span class="badge green">${formatYen(row.savings)}</span></td>
       </tr>
     `).join('')
-    : `<tr><td colspan="15">${health.hasOrders ? '商品主档と運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
+    : `<tr><td colspan="15">${health.hasOrders ? '商品マスタと運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
   target.outerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>注文数</p><strong>${summary.orderCount}</strong></article>
       <article class="stat-card"><p>同梱数</p><strong>${summary.bundleCount}</strong></article>
-      <article class="stat-card"><p>推薦配送方式</p><strong>${escapeHtml(summary.topRecommendation ? `${summary.topRecommendation.recommendedCarrier} ${summary.topRecommendation.recommendedService}` : '-')}</strong></article>
-      <article class="stat-card"><p>節省金額</p><strong>${formatYen(summary.saving)}</strong></article>
+      <article class="stat-card"><p>推奨配送方法</p><strong>${escapeHtml(summary.topRecommendation ? `${summary.topRecommendation.recommendedCarrier} ${summary.topRecommendation.recommendedService}` : '-')}</strong></article>
+      <article class="stat-card"><p>削減見込み額</p><strong>${formatYen(summary.saving)}</strong></article>
     </section>
     ${alertPanel}
     <section class="table-card full-width">
-      <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV导出</button></div>
-      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>節約金額</th></tr></thead>
+      <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV出力</button></div>
+      <div class="responsive-table"><table><thead><tr><th>同梱グループ</th><th>対象注文番号</th><th>顧客名</th><th>取込元プラットフォーム</th><th>郵便番号</th><th>配送先住所</th><th>SKU明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>削減見込み額</th></tr></thead>
       <tbody>${shipmentRows}</tbody></table></div>
     </section>
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>同梱結果</h2></div>
-      <div class="responsive-table"><table><thead><tr><th>shipmentGroupId</th><th>対象注文番号</th><th>customer</th><th>導入来源平台</th><th>postal</th><th>address</th><th>sku明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.sourcePlatform || '-')}</td><td>${escapeHtml(row.postal || '郵便番号未設定')}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="11">注文データがありません。</td></tr>'}</tbody></table></div>
+      <div class="responsive-table"><table><thead><tr><th>同梱グループ</th><th>対象注文番号</th><th>顧客名</th><th>取込元プラットフォーム</th><th>郵便番号</th><th>配送先住所</th><th>SKU明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.sourcePlatform || '-')}</td><td>${escapeHtml(row.postal || '郵便番号未設定')}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td>${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="11">注文データがありません。</td></tr>'}</tbody></table></div>
     </section>
   `;
   document.querySelector('#export-results-csv')?.addEventListener('click', () => {
     const rows = shipments.map((row) => ({
-      shipmentGroupId: row.shipmentGroupId,
-      orderNos: row.orderNos,
-      customer: row.customer,
-      postal: row.postal,
-      address: row.address,
-      items: row.items,
-      estimatedSize: row.estimatedSize,
-      totalWeight: row.totalWeight,
-      recommendedCarrier: row.recommendedCarrier,
-      recommendedService: row.recommendedService,
-      estimatedFare: row.estimatedFare,
-      secondCarrier: row.secondCarrier,
-      secondFare: row.secondFare,
-      savings: row.savings,
+      '同梱グループ': row.shipmentGroupId,
+      '対象注文番号': row.orderNos,
+      '顧客名': row.customer,
+      '郵便番号': row.postal,
+      '配送先住所': row.address,
+      'SKU明細': row.items,
+      '推定サイズ': row.estimatedSize,
+      '合計重量': row.totalWeight,
+      '推奨配送会社': row.recommendedCarrier,
+      '推奨サービス': row.recommendedService,
+      '推定運賃': row.estimatedFare,
+      '第二候補配送会社': row.secondCarrier,
+      '第二候補運賃': row.secondFare,
+      '削減見込み額': row.savings,
     }));
     downloadCsv('shipnavi-results.csv', rows);
-    showToast('結果中心CSVを出力しました。');
+    showToast('結果センターCSVを出力しました。');
+  });
+}
+
+
+function initTemplateDownloadActions() {
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-template-type][data-template-format]');
+    if (!button) return;
+    downloadImportTemplate(button.dataset.templateType, button.dataset.templateFormat);
   });
 }
 
@@ -1352,7 +2311,7 @@ function renderSettings() {
         <label class="input-group">締切時刻<input name="cutoffTime" value="${escapeHtml(settings.cutoffTime)}" /></label>
       </div><button class="button primary" type="submit">保存</button></form>
     </section>
-    <section class="panel full-width"><h2>LocalStorage</h2><p>Phase 2 MVPデータを初期状態へ戻します。</p><button class="button secondary" type="button" id="reset-dashboard-data">リセット</button></section>
+    <section class="panel full-width"><h2>ブラウザ保存データ</h2><p>初期データを初期状態へ戻します。</p><button class="button secondary" type="button" id="reset-dashboard-data">リセット</button></section>
   `;
   document.querySelector('#settings-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -1361,7 +2320,7 @@ function renderSettings() {
   });
   document.querySelector('#reset-dashboard-data')?.addEventListener('click', () => {
     Object.entries(keys).forEach(([name, key]) => storage.write(key, emptyData[name]));
-    showToast('LocalStorageをリセットしました。');
+    showToast('ブラウザ保存データをリセットしました。');
   });
 }
 
@@ -1375,4 +2334,7 @@ if (document.body.classList.contains('app-body')) {
   renderTemplates();
   renderResults();
   renderSettings();
+  initImportIssueActions();
+  initTemplateDownloadActions();
+  renderGlobalImportIssues();
 }

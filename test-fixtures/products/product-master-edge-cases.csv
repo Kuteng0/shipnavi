@@ -1,0 +1,11 @@
+﻿# 説明行: 商品マスタの異常系を含む匿名 fixture です。
+商品ID,商品名,重量kg,縦,横,高さ,三辺合計,bundleEligible,入力サイズ,注意
+SKU-P-EDGE-001,正常商品,0.45,20,20,15,55,true,60,正常データ
+,SKU欠落商品,0.5,20,20,20,60,true,60,missing SKU
+SKU-P-EDGE-003,重量欠落商品,,20,20,20,60,true,60,missing weight
+SKU-P-EDGE-004,単位不明商品,重い,20寸,20寸,20寸,,true,60,unit error
+SKU-P-EDGE-005,mm混在商品,900g,300mm,250mm,200mm,,true,80,mm to cm
+SKU-P-EDGE-006,サイズ不一致商品,800g,30,30,30,90,true,60,size mismatch
+SKU-P-EDGE-007,大型商品,5kg,80,50,40,170,false,160,oversized
+,,,,,,,,,空行検証
+# 末尾説明行: 実データではエクスポートツールの説明行が混入することがあります。
