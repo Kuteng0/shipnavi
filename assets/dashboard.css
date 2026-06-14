@@ -746,6 +746,69 @@ td {
   font-variant-numeric: tabular-nums;
 }
 
+.summary-toolbar {
+  padding: 0 0 12px;
+}
+
+.summary-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.summary-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.status-select {
+  width: 100%;
+  min-width: 9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--white);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.queue-actions {
+  min-width: 15rem;
+}
+
+.shipment-status-imported {
+  color: #12385f;
+  background: #e8f1fb;
+}
+
+.shipment-status-pending {
+  color: #5f4500;
+  background: #fff2c2;
+}
+
+.shipment-status-ready {
+  color: #074a2d;
+  background: #dff6ea;
+}
+
+.shipment-status-shipped {
+  color: #173b7a;
+  background: #e1eaff;
+}
+
+.shipment-status-on-hold {
+  color: #6b3a00;
+  background: #ffe8cc;
+}
+
+.shipment-status-error {
+  color: #8a1f1f;
+  background: #ffe0e0;
+}
+
 .results-table th:nth-child(6),
 .results-table th:nth-child(7),
 .queue-table th:nth-child(6),

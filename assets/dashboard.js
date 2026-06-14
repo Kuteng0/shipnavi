@@ -22,10 +22,20 @@ const keys = {
   resultSnapshots: 'shipnaviDashboardResultSnapshots',
   settings: 'shipnaviDashboardSettings',
   importIssues: 'shipnaviDashboardImportIssues',
+  shipmentStatuses: 'shipnaviDashboardShipmentStatuses',
 };
 
 const supportedCarriers = ['ヤマト', '佐川', '日本郵便'];
 const shippingSizes = [60, 80, 100, 120, 140, 160];
+const shipmentStatusModel = ['imported', 'pending', 'ready', 'shipped', 'on_hold', 'error'];
+const shipmentStatusLabels = {
+  imported: '取込済み',
+  pending: '確認待ち',
+  ready: '出荷準備完了',
+  shipped: '出荷済み',
+  on_hold: '保留',
+  error: 'エラー',
+};
 
 const emptyData = {
   products: [],
@@ -37,6 +47,7 @@ const emptyData = {
   resultSnapshots: [],
   settings: { company: 'ShipNavi', email: 'shipping@example.jp', defaultCarrier: 'ヤマト', cutoffTime: '15:00' },
   importIssues: [],
+  shipmentStatuses: {},
 };
 
 function seedDashboardData() {
@@ -51,6 +62,44 @@ function getData(name) {
 
 function setData(name, value) {
   storage.write(keys[name], value);
+}
+
+function normalizeShipmentStatus(status) {
+  return shipmentStatusModel.includes(status) ? status : 'imported';
+}
+
+function getShipmentStatuses() {
+  const statuses = getData('shipmentStatuses');
+  return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : {};
+}
+
+function setShipmentStatuses(statuses) {
+  setData('shipmentStatuses', statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : {});
+}
+
+function getShipmentStatus(shipmentGroupId) {
+  return normalizeShipmentStatus(getShipmentStatuses()[shipmentGroupId]?.status);
+}
+
+function updateShipmentStatus(shipmentGroupId, status) {
+  const normalizedStatus = normalizeShipmentStatus(status);
+  const statuses = getShipmentStatuses();
+  setShipmentStatuses({
+    ...statuses,
+    [shipmentGroupId]: {
+      shipmentGroupId,
+      status: normalizedStatus,
+      updatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+function getShipmentStatusLabel(status) {
+  return shipmentStatusLabels[normalizeShipmentStatus(status)];
+}
+
+function getShipmentStatusClass(status) {
+  return `shipment-status-${normalizeShipmentStatus(status).replace('_', '-')}`;
 }
 
 function normalizeIssueStatus(status) {
@@ -1846,7 +1895,13 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
 function getShipmentGroups() {
   const health = getDataHealth();
   if (!health.hasOrders) return [];
-  return getShipmentOrderGroups().map((orders, index) => buildShipmentGroup(orders, index));
+  return getShipmentOrderGroups().map((orders, index) => {
+    const shipment = buildShipmentGroup(orders, index);
+    return {
+      ...shipment,
+      shipmentStatus: getShipmentStatus(shipment.shipmentGroupId),
+    };
+  });
 }
 
 function getRecommendationRows() {
@@ -1886,6 +1941,7 @@ function renderDashboard() {
         <a class="action-card" href="orders.html"><b>注文CSV</b><span>orderNo, customer, postal, address, sku, quantity</span></a>
         <a class="action-card" href="products.html"><b>商品マスタ</b><span>sku, name, size, weight, length, width, height, bundleable</span></a>
         <a class="action-card" href="carriers.html"><b>運賃表</b><span>carrier, service, size, zone, fare</span></a>
+        <a class="action-card" href="shipment-queue.html"><b>出荷キュー</b><span>出荷状態の確認と出荷CSV出力</span></a>
         <a class="action-card" href="results.html"><b>結果センター</b><span>推奨配送方法とCSV出力</span></a>
       </div>
     </section>
@@ -2251,11 +2307,145 @@ function renderTemplates() {
   `;
 }
 
+function buildShipmentExportRows(shipments) {
+  return shipments.map((row) => ({
+    '出荷グループ': row.shipmentGroupId,
+    '出荷状態': getShipmentStatusLabel(row.shipmentStatus),
+    '対象注文番号': row.orderNos,
+    '顧客名': row.customer,
+    '取込元プラットフォーム': row.sourcePlatform || '-',
+    '郵便番号': row.postal,
+    '配送先住所': row.address,
+    'SKU明細': row.items,
+    '推定サイズ': row.estimatedSize,
+    '合計重量': row.totalWeight,
+    '推奨配送会社': row.recommendedCarrier,
+    '推奨サービス': row.recommendedService,
+    '推定運賃': row.estimatedFare,
+    '削減見込み額': row.savings,
+  }));
+}
+
+function renderShipmentStatusSelect(row) {
+  return `
+    <select class="status-select" data-shipment-status="${escapeHtml(row.shipmentGroupId)}" aria-label="${escapeHtml(row.shipmentGroupId)} の出荷状態">
+      ${shipmentStatusModel.map((status) => `<option value="${status}" ${row.shipmentStatus === status ? 'selected' : ''}>${shipmentStatusLabels[status]}</option>`).join('')}
+    </select>
+  `;
+}
+
+function renderShipmentActionButtons(row) {
+  const actions = [
+    ['pending', '確認待ち'],
+    ['ready', '準備完了'],
+    ['shipped', '出荷済み'],
+    ['on_hold', '保留'],
+    ['error', 'エラー'],
+  ];
+  return actions.map(([status, label]) => `<button class="small-button" type="button" data-set-shipment-status="${status}" data-shipment-id="${escapeHtml(row.shipmentGroupId)}">${label}</button>`).join('');
+}
+
+function renderShipmentQueue() {
+  const target = document.querySelector('#shipment-queue-view');
+  if (!target) return;
+  const shipments = getShipmentGroups();
+  const exportableCount = shipments.filter((row) => !['error', 'on_hold'].includes(row.shipmentStatus)).length;
+  const rows = shipments.length
+    ? shipments.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.shipmentGroupId)}</td>
+        <td><span class="badge ${getShipmentStatusClass(row.shipmentStatus)}">${escapeHtml(getShipmentStatusLabel(row.shipmentStatus))}</span></td>
+        <td>${renderShipmentStatusSelect(row)}</td>
+        <td>${escapeHtml(row.orderNos)}</td>
+        <td>${escapeHtml(row.customer)}</td>
+        <td>${escapeHtml(row.sourcePlatform || '-')}</td>
+        <td>${escapeHtml(row.postal || '郵便番号未設定')}</td>
+        <td class="wrap-cell address-cell">${escapeHtml(row.address)}</td>
+        <td class="wrap-cell sku-cell">${escapeHtml(row.items)}</td>
+        <td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td>
+        <td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td>
+        <td>${escapeHtml(row.recommendedCarrier || row.status)}</td>
+        <td>${escapeHtml(row.recommendedService || '-')}</td>
+        <td class="money-cell">${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td>
+        <td><div class="row-actions queue-actions">${renderShipmentActionButtons(row)}</div></td>
+      </tr>
+    `).join('')
+    : '<tr><td colspan="15">出荷候補がありません。注文データを取り込んでください。</td></tr>';
+  target.innerHTML = `
+    <section class="stat-grid full-width">
+      <article class="stat-card"><p>出荷候補</p><strong>${shipments.length}</strong></article>
+      <article class="stat-card"><p>出荷CSV対象</p><strong>${exportableCount}</strong></article>
+      <article class="stat-card"><p>出荷準備完了</p><strong>${shipments.filter((row) => row.shipmentStatus === 'ready').length}</strong></article>
+      <article class="stat-card"><p>出荷済み</p><strong>${shipments.filter((row) => row.shipmentStatus === 'shipped').length}</strong></article>
+    </section>
+    <section class="table-card full-width">
+      <div class="table-toolbar">
+        <div><h2>出荷キュー</h2><p class="help-text">エラーと保留は出荷CSV出力から初期除外します。</p></div>
+        <button class="button secondary" type="button" id="export-shipment-csv">出荷CSV出力</button>
+      </div>
+      <div class="responsive-table queue-table shipment-queue-table"><table><thead><tr><th>出荷グループ</th><th>状態</th><th>状態変更</th><th>対象注文番号</th><th>顧客名</th><th>取込元プラットフォーム</th><th>郵便番号</th><th>配送先住所</th><th>SKU明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>
+    </section>
+  `;
+  document.querySelector('#export-shipment-csv')?.addEventListener('click', () => {
+    const exportRows = buildShipmentExportRows(getShipmentGroups().filter((row) => !['error', 'on_hold'].includes(row.shipmentStatus)));
+    downloadCsv('shipnavi-shipment-queue.csv', exportRows);
+    showToast('出荷CSVを出力しました。');
+  });
+}
+
+function initShipmentQueue() {
+  if (!document.querySelector('#shipment-queue-view')) return;
+  renderShipmentQueue();
+  document.addEventListener('change', (event) => {
+    const shipmentGroupId = event.target?.dataset?.shipmentStatus;
+    if (!shipmentGroupId) return;
+    updateShipmentStatus(shipmentGroupId, event.target.value);
+    renderShipmentQueue();
+    showToast('出荷状態を更新しました。');
+  });
+  document.addEventListener('click', (event) => {
+    const status = event.target?.dataset?.setShipmentStatus;
+    const shipmentGroupId = event.target?.dataset?.shipmentId;
+    if (!status || !shipmentGroupId) return;
+    updateShipmentStatus(shipmentGroupId, status);
+    renderShipmentQueue();
+    showToast('出荷状態を更新しました。');
+  });
+}
+
+function buildShipmentResultSummary(shipments) {
+  return {
+    carrierCounts: shipments.reduce((acc, row) => {
+      const carrier = row.recommendedCarrier || '未割当';
+      acc[carrier] = (acc[carrier] || 0) + 1;
+      return acc;
+    }, {}),
+    statusCounts: shipments.reduce((acc, row) => {
+      const label = getShipmentStatusLabel(row.shipmentStatus);
+      acc[label] = (acc[label] || 0) + 1;
+      return acc;
+    }, {}),
+    savings: {
+      shipmentCount: shipments.length,
+      saving: shipments.reduce((sum, row) => sum + toNumber(row.savings), 0),
+      readyCount: shipments.filter((row) => row.shipmentStatus === 'ready').length,
+      exportableCount: shipments.filter((row) => !['error', 'on_hold'].includes(row.shipmentStatus)).length,
+    },
+  };
+}
+
+function renderCountList(counts, emptyText) {
+  const entries = Object.entries(counts);
+  if (!entries.length) return `<li><span>${escapeHtml(emptyText)}</span><strong>0</strong></li>`;
+  return entries.map(([label, count]) => `<li><span>${escapeHtml(label)}</span><strong>${count}</strong></li>`).join('');
+}
+
 function renderResults() {
   const target = document.querySelector('#results-view');
   if (!target) return;
   const summary = getResultSummary();
   const shipments = getShipmentGroups();
+  const shipmentSummary = buildShipmentResultSummary(shipments);
   const health = getDataHealth();
   const alertPanel = summary.errors.length ? `
     <section class="panel full-width">
@@ -2292,6 +2482,28 @@ function renderResults() {
       <article class="stat-card"><p>削減見込み額</p><strong>${formatYen(summary.saving)}</strong></article>
     </section>
     ${alertPanel}
+    <section class="panel full-width">
+      <div class="table-toolbar summary-toolbar"><h2>出荷結果サマリー</h2><a class="button secondary compact-button" href="shipment-queue.html">出荷キューを開く</a></div>
+      <div class="result-grid">
+        <article class="summary-panel">
+          <h3>配送会社別件数</h3>
+          <ul class="status-list">${renderCountList(shipmentSummary.carrierCounts, '配送会社なし')}</ul>
+        </article>
+        <article class="summary-panel">
+          <h3>出荷状態別件数</h3>
+          <ul class="status-list">${renderCountList(shipmentSummary.statusCounts, '出荷状態なし')}</ul>
+        </article>
+        <article class="summary-panel full-width">
+          <h3>推定削減サマリー</h3>
+          <ul class="status-list">
+            <li><span>出荷候補</span><strong>${shipmentSummary.savings.shipmentCount}</strong></li>
+            <li><span>CSV出力対象</span><strong>${shipmentSummary.savings.exportableCount}</strong></li>
+            <li><span>出荷準備完了</span><strong>${shipmentSummary.savings.readyCount}</strong></li>
+            <li><span>削減見込み額</span><strong>${formatYen(shipmentSummary.savings.saving)}</strong></li>
+          </ul>
+        </article>
+      </div>
+    </section>
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV出力</button></div>
       <div class="responsive-table results-table"><table><thead><tr><th>同梱グループ</th><th>対象注文番号</th><th>顧客名</th><th>取込元プラットフォーム</th><th>郵便番号</th><th>配送先住所</th><th>SKU明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>削減見込み額</th></tr></thead>
@@ -2368,6 +2580,7 @@ if (document.body.classList.contains('app-body')) {
   initCarriers();
   initOrders();
   renderTemplates();
+  initShipmentQueue();
   renderResults();
   renderSettings();
   initImportIssueActions();
