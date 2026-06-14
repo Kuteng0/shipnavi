@@ -517,7 +517,7 @@ tr:last-child td {
 
 @media (min-width: 860px) {
   .app-shell {
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: 220px 1fr;
   }
 
   .app-sidebar {
@@ -525,7 +525,7 @@ tr:last-child td {
     justify-content: flex-start;
     flex-direction: column;
     min-height: 100vh;
-    padding: 24px 18px;
+    padding: 20px 14px;
     border-right: 1px solid var(--line);
     border-bottom: 0;
   }
@@ -547,8 +547,8 @@ tr:last-child td {
   }
 
   .app-main {
-    width: min(1180px, calc(100% - 48px));
-    padding: 42px 0 72px;
+    width: min(1220px, calc(100% - 36px));
+    padding: 32px 0 64px;
   }
 
   .app-topbar {
@@ -827,4 +827,246 @@ td {
 .queue-table td:nth-child(8) {
   width: 7rem;
   white-space: nowrap;
+}
+
+/* Phase9 density and matrix workflow */
+.app-topbar {
+  margin-bottom: 16px;
+}
+
+.app-topbar h1 {
+  margin-bottom: 6px;
+}
+
+.button {
+  min-height: 44px;
+  padding: 0 18px;
+}
+
+.dashboard-grid,
+.stat-grid,
+.action-grid,
+.form-grid,
+.template-grid,
+.result-grid,
+.settings-grid {
+  gap: 10px;
+}
+
+.panel,
+.form-card,
+.upload-card,
+.empty-card {
+  padding: 14px;
+}
+
+.stat-card {
+  padding: 12px;
+}
+
+.stat-card strong {
+  font-size: clamp(1.45rem, 4vw, 2.15rem);
+}
+
+.table-toolbar {
+  padding: 10px 12px;
+}
+
+th,
+td {
+  padding: 8px 10px;
+}
+
+.sidebar-menu a {
+  padding: 10px 12px;
+}
+
+.matrix-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.matrix-editor-header {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.matrix-editor-actions {
+  align-items: end;
+}
+
+.compact-input {
+  gap: 5px;
+}
+
+.compact-input input {
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.matrix-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.matrix-table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.matrix-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.matrix-table th,
+.matrix-table td {
+  padding: 0;
+}
+
+.matrix-table th {
+  padding: 8px;
+}
+
+.matrix-cell-input {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 0;
+  padding: 7px 8px;
+  background: var(--white);
+  color: var(--text);
+  outline: 1px solid transparent;
+}
+
+.matrix-cell-input:focus {
+  position: relative;
+  z-index: 2;
+  outline-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.money-input,
+.matrix-table td:not(:first-child):not(:nth-child(2)) input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.results-filter-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  grid-template-columns: minmax(10rem, 1fr);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+}
+
+.compact-results-table table {
+  min-width: 900px;
+  table-layout: fixed;
+}
+
+.compact-results-table th:nth-child(1) {
+  width: 8rem;
+}
+
+.compact-results-table th:nth-child(2),
+.compact-results-table th:nth-child(5) {
+  width: 14rem;
+}
+
+.compact-results-table th:nth-child(6) {
+  width: 10rem;
+  text-align: right;
+}
+
+.compact-results-table td {
+  vertical-align: top;
+}
+
+.id-cell,
+.result-info-cell,
+.money-cell {
+  display: table-cell;
+}
+
+.id-cell strong,
+.id-cell span,
+.result-info-cell strong,
+.result-info-cell span,
+.money-cell strong,
+.money-cell span,
+.address-cell strong,
+.address-cell span,
+.sku-cell strong,
+.sku-cell span {
+  display: block;
+}
+
+.id-cell span,
+.result-info-cell span,
+.address-cell span,
+.sku-cell span,
+.money-cell span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.compact-results-table .address-cell,
+.compact-results-table .sku-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
+.compact-results-table .money-cell,
+.compact-results-table .money-cell strong,
+.compact-results-table .money-cell span {
+  white-space: nowrap;
+}
+
+.back-to-top {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--primary);
+  background: var(--white);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.back-to-top.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+@media (min-width: 760px) {
+  .matrix-editor-header {
+    grid-template-columns: minmax(10rem, 0.8fr) minmax(10rem, 0.8fr) minmax(18rem, 1.4fr);
+  }
+
+  .results-filter-toolbar {
+    grid-template-columns: minmax(10rem, 1fr) minmax(18rem, 0.9fr) auto;
+  }
 }

@@ -2065,6 +2065,27 @@ function initProducts() {
   });
 }
 
+function getMatrixEditorState() {
+  const currentMatrix = getFareTableState().matrixView;
+  if (!currentMatrix) return null;
+  return normalizeMatrixView({
+    ...currentMatrix,
+    carrier: document.querySelector('#matrix-carrier')?.value || currentMatrix.carrier,
+    service: document.querySelector('#matrix-service')?.value || currentMatrix.service,
+    rows: currentMatrix.rows.map((row, rowIndex) => ({
+      size: document.querySelector(`[data-matrix-size="${rowIndex}"]`)?.value || row.size,
+      weight: document.querySelector(`[data-matrix-weight="${rowIndex}"]`)?.value || row.weight,
+      fares: Object.fromEntries(currentMatrix.zoneHeaders.map((zone, zoneIndex) => [zone, document.querySelector(`[data-matrix-fare="${rowIndex}"][data-zone-index="${zoneIndex}"]`)?.value || ''])),
+    })),
+  });
+}
+
+function saveMatrixEditorState(nextMatrix) {
+  const normalizedFareRows = normalizeFareMatrix(nextMatrix);
+  setFareTableState(nextMatrix, normalizedFareRows);
+  setData('carriers', normalizedFareRows);
+}
+
 function renderCarriers(filter = '') {
   const tbody = document.querySelector('#carriers-table');
   if (!tbody) return;
@@ -2080,25 +2101,30 @@ function renderCarriers(filter = '') {
     const zoneHeaderCells = matrix.zoneHeaders.map((zone) => `<th>${escapeHtml(zone)}</th>`).join('');
     const matrixRows = matrix.rows.map((row, rowIndex) => `
       <tr>
-        <td><input data-matrix-size="${rowIndex}" value="${escapeHtml(row.size)}" /></td>
-        <td><input data-matrix-weight="${rowIndex}" value="${escapeHtml(row.weight)}" /></td>
-        ${matrix.zoneHeaders.map((zone, zoneIndex) => `<td><input data-matrix-fare="${rowIndex}" data-zone-index="${zoneIndex}" value="${escapeHtml(row.fares?.[zone] || '')}" /></td>`).join('')}
+        <td><input class="matrix-cell-input" data-matrix-size="${rowIndex}" value="${escapeHtml(row.size)}" /></td>
+        <td><input class="matrix-cell-input" data-matrix-weight="${rowIndex}" value="${escapeHtml(row.weight)}" /></td>
+        ${matrix.zoneHeaders.map((zone, zoneIndex) => `<td><input class="matrix-cell-input money-input" inputmode="numeric" data-matrix-fare="${rowIndex}" data-zone-index="${zoneIndex}" value="${escapeHtml(row.fares?.[zone] || '')}" /></td>`).join('')}
       </tr>
     `).join('');
     tbody.innerHTML = `
       <tr>
         <td colspan="6">
-          <div class="table-toolbar">
-            <strong>${escapeHtml(matrix.carrier)} / ${escapeHtml(matrix.service)}</strong>
-            <div class="row-actions">
-              <button class="small-button" type="button" data-save-fare-matrix="true">保存</button>
+          <div class="matrix-editor">
+            <div class="matrix-editor-header">
+              <label class="input-group compact-input">配送会社<input id="matrix-carrier" value="${escapeHtml(matrix.carrier)}" /></label>
+              <label class="input-group compact-input">サービス<input id="matrix-service" value="${escapeHtml(matrix.service)}" /></label>
+              <div class="row-actions matrix-editor-actions">
+                <button class="small-button" type="button" data-add-fare-matrix-row="true">行を追加</button>
+                <button class="small-button" type="button" data-add-fare-matrix-zone="true">地域列を追加</button>
+                <button class="small-button" type="button" data-save-fare-matrix="true">保存</button>
+              </div>
             </div>
-          </div>
-          <div class="responsive-table">
-            <table>
+            <div class="responsive-table matrix-table-wrap">
+            <table class="matrix-table">
               <thead><tr><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${zoneHeaderCells}</tr></thead>
               <tbody>${matrixRows}</tbody>
             </table>
+            </div>
           </div>
         </td>
       </tr>
@@ -2138,20 +2164,39 @@ function initCarriers() {
       showToast('運賃行を削除しました。');
       return;
     }
-    if (event.target.dataset?.saveFareMatrix !== 'true') return;
     const currentMatrix = getFareTableState().matrixView;
     if (!currentMatrix) return;
-    const nextMatrix = normalizeMatrixView({
-      ...currentMatrix,
-      rows: currentMatrix.rows.map((row, rowIndex) => ({
-        size: document.querySelector(`[data-matrix-size="${rowIndex}"]`)?.value || '',
-        weight: document.querySelector(`[data-matrix-weight="${rowIndex}"]`)?.value || '',
-        fares: Object.fromEntries(currentMatrix.zoneHeaders.map((zone, zoneIndex) => [zone, document.querySelector(`[data-matrix-fare="${rowIndex}"][data-zone-index="${zoneIndex}"]`)?.value || ''])),
-      })),
-    });
-    const normalizedFareRows = normalizeFareMatrix(nextMatrix);
-    setFareTableState(nextMatrix, normalizedFareRows);
-    setData('carriers', normalizedFareRows);
+    if (event.target.dataset?.addFareMatrixRow) {
+      const editorMatrix = getMatrixEditorState() || currentMatrix;
+      const lastSize = toNumber(editorMatrix.rows.at(-1)?.size);
+      const nextSize = shippingSizes.find((size) => size > lastSize) || '';
+      const nextMatrix = normalizeMatrixView({
+        ...editorMatrix,
+        rows: [...editorMatrix.rows, { size: nextSize, weight: '', fares: {} }],
+      });
+      saveMatrixEditorState(nextMatrix);
+      renderCarriers(search?.value || '');
+      showToast('マトリクス行を追加しました。');
+      return;
+    }
+    if (event.target.dataset?.addFareMatrixZone) {
+      const zoneName = window.prompt('追加する地域名を入力してください。');
+      const normalizedZoneName = compactText(zoneName);
+      if (!normalizedZoneName) return;
+      const editorMatrix = getMatrixEditorState() || currentMatrix;
+      const nextMatrix = normalizeMatrixView({
+        ...editorMatrix,
+        zoneHeaders: [...editorMatrix.zoneHeaders, normalizedZoneName],
+      });
+      saveMatrixEditorState(nextMatrix);
+      renderCarriers(search?.value || '');
+      showToast('地域列を追加しました。');
+      return;
+    }
+    if (event.target.dataset?.saveFareMatrix !== 'true') return;
+    const nextMatrix = getMatrixEditorState();
+    if (!nextMatrix) return;
+    saveMatrixEditorState(nextMatrix);
     renderCarriers(search?.value || '');
     showToast('マトリクス運賃表を保存しました。');
   });
@@ -2440,11 +2485,45 @@ function renderCountList(counts, emptyText) {
   return entries.map(([label, count]) => `<li><span>${escapeHtml(label)}</span><strong>${count}</strong></li>`).join('');
 }
 
-function renderResults() {
+function shipmentMatchesFilter(row, keyword) {
+  if (!keyword) return true;
+  return [
+    row.shipmentGroupId,
+    row.orderNos,
+    row.customer,
+    row.sourcePlatform,
+    row.postal,
+    row.address,
+    row.items,
+    row.recommendedCarrier,
+    row.recommendedService,
+    row.status,
+  ].join(' ').toLowerCase().includes(keyword);
+}
+
+function renderCompactResultRow(row) {
+  const packageText = row.estimatedSize ? `${row.estimatedSize}サイズ / ${toNumber(row.totalWeight).toLocaleString('ja-JP')}g` : row.status;
+  const fareText = row.estimatedFare === '' ? row.status : formatYen(row.estimatedFare);
+  const secondFareText = row.secondFare === '' ? '-' : formatYen(row.secondFare);
+  return `
+    <tr>
+      <td class="id-cell"><strong>${escapeHtml(row.shipmentGroupId)}</strong><span>${escapeHtml(row.sourcePlatform || '-')}</span></td>
+      <td class="result-info-cell"><strong>${escapeHtml(row.customer)}</strong><span>${escapeHtml(row.orderNos)}</span></td>
+      <td class="wrap-cell address-cell"><strong>${escapeHtml(row.postal || '郵便番号未設定')}</strong><span>${escapeHtml(row.address)}</span></td>
+      <td class="wrap-cell sku-cell"><strong>${escapeHtml(packageText)}</strong><span>${escapeHtml(row.items)}</span></td>
+      <td class="result-info-cell"><strong>${escapeHtml(row.recommendedCarrier || row.status)}</strong><span>${escapeHtml(row.recommendedService || '-')}</span><span>第二候補: ${escapeHtml(row.secondCarrier || '-')}</span></td>
+      <td class="money-cell"><strong>${escapeHtml(fareText)}</strong><span>${escapeHtml(secondFareText)}</span><span class="badge green">${formatYen(row.savings)}</span></td>
+    </tr>
+  `;
+}
+
+function renderResults(filter = '') {
   const target = document.querySelector('#results-view');
   if (!target) return;
   const summary = getResultSummary();
   const shipments = getShipmentGroups();
+  const keyword = normalize(filter).toLowerCase();
+  const visibleShipments = shipments.filter((row) => shipmentMatchesFilter(row, keyword));
   const shipmentSummary = buildShipmentResultSummary(shipments);
   const health = getDataHealth();
   const alertPanel = summary.errors.length ? `
@@ -2453,28 +2532,11 @@ function renderResults() {
       ${summary.errors.map((error) => `<p>${escapeHtml(error)}</p>`).join('')}
     </section>
   ` : '';
-  const shipmentRows = shipments.length
-    ? shipments.map((row) => `
-      <tr>
-        <td>${escapeHtml(row.shipmentGroupId)}</td>
-        <td>${escapeHtml(row.orderNos)}</td>
-        <td>${escapeHtml(row.customer)}</td>
-        <td>${escapeHtml(row.sourcePlatform || '-')}</td>
-        <td>${escapeHtml(row.postal || '郵便番号未設定')}</td>
-        <td class="wrap-cell address-cell">${escapeHtml(row.address)}</td>
-        <td class="wrap-cell sku-cell">${escapeHtml(row.items)}</td>
-        <td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td>
-        <td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td>
-        <td>${escapeHtml(row.recommendedCarrier || row.status)}</td>
-        <td>${escapeHtml(row.recommendedService)}</td>
-        <td class="money-cell">${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td>
-        <td>${escapeHtml(row.secondCarrier || '-')}</td>
-        <td class="money-cell">${row.secondFare === '' ? '-' : formatYen(row.secondFare)}</td>
-        <td class="money-cell"><span class="badge green">${formatYen(row.savings)}</span></td>
-      </tr>
-    `).join('')
-    : `<tr><td colspan="15">${health.hasOrders ? '商品マスタと運賃表を取り込むと計算されます。' : '注文データがありません。'}</td></tr>`;
-  target.outerHTML = `
+  const shipmentRows = visibleShipments.length
+    ? visibleShipments.map(renderCompactResultRow).join('')
+    : `<tr><td colspan="6">${shipments.length ? '検索条件に一致する結果がありません。' : (health.hasOrders ? '商品マスタと運賃表を取り込むと計算されます。' : '注文データがありません。')}</td></tr>`;
+  target.classList.add('full-width');
+  target.innerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>注文数</p><strong>${summary.orderCount}</strong></article>
       <article class="stat-card"><p>同梱数</p><strong>${summary.bundleCount}</strong></article>
@@ -2505,17 +2567,18 @@ function renderResults() {
       </div>
     </section>
     <section class="table-card full-width">
-      <div class="table-toolbar"><h2>運賃比較結果</h2><button class="button secondary" type="button" id="export-results-csv">CSV出力</button></div>
-      <div class="responsive-table results-table"><table><thead><tr><th>同梱グループ</th><th>対象注文番号</th><th>顧客名</th><th>取込元プラットフォーム</th><th>郵便番号</th><th>配送先住所</th><th>SKU明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>第二候補</th><th>第二候補運賃</th><th>削減見込み額</th></tr></thead>
+      <div class="table-toolbar results-filter-toolbar"><div><h2>運賃比較結果</h2><p class="help-text">${visibleShipments.length} / ${shipments.length}件を表示</p></div><input class="search-input" id="results-search" value="${escapeHtml(filter)}" placeholder="注文番号・顧客名・配送先・SKUで検索" /><button class="button secondary compact-button" type="button" id="export-results-csv">CSV出力</button></div>
+      <div class="responsive-table results-table compact-results-table"><table><thead><tr><th>グループ</th><th>注文 / 顧客</th><th>配送先</th><th>荷物</th><th>推奨</th><th>運賃 / 削減</th></tr></thead>
       <tbody>${shipmentRows}</tbody></table></div>
     </section>
     <section class="table-card full-width">
       <div class="table-toolbar"><h2>同梱結果</h2></div>
-      <div class="responsive-table queue-table"><table><thead><tr><th>同梱グループ</th><th>対象注文番号</th><th>顧客名</th><th>取込元プラットフォーム</th><th>郵便番号</th><th>配送先住所</th><th>SKU明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推定運賃</th></tr></thead><tbody>${shipments.length ? shipments.map((row) => `<tr><td>${escapeHtml(row.shipmentGroupId)}</td><td>${escapeHtml(row.orderNos)}</td><td>${escapeHtml(row.customer)}</td><td>${escapeHtml(row.sourcePlatform || '-')}</td><td>${escapeHtml(row.postal || '郵便番号未設定')}</td><td class="wrap-cell address-cell">${escapeHtml(row.address)}</td><td class="wrap-cell sku-cell">${escapeHtml(row.items)}</td><td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td><td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td><td>${escapeHtml(row.recommendedCarrier || row.status)}</td><td class="money-cell">${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td></tr>`).join('') : '<tr><td colspan="11">注文データがありません。</td></tr>'}</tbody></table></div>
+      <div class="responsive-table queue-table compact-results-table"><table><thead><tr><th>グループ</th><th>注文 / 顧客</th><th>配送先</th><th>荷物</th><th>推奨</th><th>運賃 / 削減</th></tr></thead><tbody>${visibleShipments.length ? visibleShipments.map(renderCompactResultRow).join('') : '<tr><td colspan="6">注文データがありません。</td></tr>'}</tbody></table></div>
     </section>
   `;
+  document.querySelector('#results-search')?.addEventListener('input', (event) => renderResults(event.target.value));
   document.querySelector('#export-results-csv')?.addEventListener('click', () => {
-    const rows = shipments.map((row) => ({
+    const rows = visibleShipments.map((row) => ({
       '同梱グループ': row.shipmentGroupId,
       '対象注文番号': row.orderNos,
       '顧客名': row.customer,
@@ -2543,6 +2606,21 @@ function initTemplateDownloadActions() {
     if (!button) return;
     downloadImportTemplate(button.dataset.templateType, button.dataset.templateFormat);
   });
+}
+
+function initBackToTopButton() {
+  if (document.querySelector('#back-to-top')) return;
+  const button = document.createElement('button');
+  button.id = 'back-to-top';
+  button.className = 'back-to-top';
+  button.type = 'button';
+  button.textContent = '↑';
+  button.setAttribute('aria-label', 'ページ上部へ戻る');
+  document.body.appendChild(button);
+  const syncVisibility = () => button.classList.toggle('is-visible', window.scrollY > 360);
+  button.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  window.addEventListener('scroll', syncVisibility, { passive: true });
+  syncVisibility();
 }
 
 function renderSettings() {
@@ -2585,5 +2663,6 @@ if (document.body.classList.contains('app-body')) {
   renderSettings();
   initImportIssueActions();
   initTemplateDownloadActions();
+  initBackToTopButton();
   renderGlobalImportIssues();
 }
