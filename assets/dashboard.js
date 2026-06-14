@@ -824,6 +824,15 @@ function headerSet(headers) {
 }
 
 const standardOrderFields = ['orderNo', 'customer', 'address', 'sku', 'quantity'];
+const orderPreviewFields = ['orderNo', 'customer', 'postal', 'address', 'sku', 'quantity'];
+const orderPreviewFieldLabels = {
+  orderNo: '注文番号',
+  customer: '顧客名',
+  postal: '郵便番号',
+  address: '配送先住所',
+  sku: 'SKU',
+  quantity: '数量',
+};
 
 const platformFieldMappings = {
   'ShipNavi標準': {
@@ -1015,6 +1024,51 @@ function getPlatformMissingHeaders(headers, platform) {
   return missing.filter((header, index, list) => list.findIndex((item) => normalizeHeader(item) === normalizeHeader(header)) === index);
 }
 
+function getOrderPreviewMappedFields(headers, platform) {
+  const mapping = platformFieldMappings[platform];
+  if (!mapping?.fieldCandidates) return [];
+  return orderPreviewFields
+    .map((field) => {
+      let candidateGroups = mapping.fieldCandidates[field] || [];
+      if (field === 'sku') {
+        const skuCandidates = mapping.fieldCandidates.sku || [];
+        candidateGroups = skuCandidates.some((candidate) => hasResolvableField(headers, [candidate]))
+          ? skuCandidates
+          : (mapping.fieldCandidates.productName || []);
+      }
+      const matchedHeaders = candidateGroups
+        .map((candidate) => fieldCandidate(candidate))
+        .filter((candidate) => candidate.fields.every((header) => headerSet(headers).has(normalizeHeader(header))))
+        .flatMap((candidate) => candidate.fields);
+      return {
+        field,
+        label: orderPreviewFieldLabels[field] || field,
+        headers: [...new Set(matchedHeaders)],
+      };
+    })
+    .filter((entry) => entry.headers.length);
+}
+
+function buildOrderImportPreview(headers, platform, rowCount, importResult = {}) {
+  const detectedPlatform = platform || 'unknown';
+  return {
+    detectedPlatform,
+    rowCount,
+    mappedFields: getOrderPreviewMappedFields(headers, detectedPlatform),
+    missingFields: importResult.missingHeaders || (detectedPlatform === 'unknown' ? [] : getPlatformMissingHeaders(headers, detectedPlatform)),
+    warningCount: importResult.warningCount || 0,
+    failureCount: importResult.failureCount || 0,
+  };
+}
+
+function formatOrderImportPreview(preview) {
+  const mappedText = (preview.mappedFields || [])
+    .map((entry) => `${entry.label}: ${entry.headers.join(' + ')}`)
+    .join('、') || 'なし';
+  const missingText = (preview.missingFields || []).join('、') || 'なし';
+  return `プレビュー: 検出プラットフォーム=${preview.detectedPlatform} / 行数=${preview.rowCount} / マッピング=${mappedText} / 不足している項目=${missingText} / 警告数=${preview.warningCount}`;
+}
+
 function resolveField(row, candidates) {
   return (candidates || []).reduce((found, candidate) => {
     if (found) return found;
@@ -1036,6 +1090,7 @@ function normalizePlatformOrderRow(row, platform) {
   const numericQuantity = toNumber(rawQuantity);
   const warnings = [];
 
+  if (!customer) warnings.push('顧客名未設定');
   if (!postal) warnings.push('郵便番号未設定');
   if (postal && !isValidPostalFormat(postal)) warnings.push('郵便番号形式不正');
   if (postal && isValidPostalFormat(postal) && getZoneByPostal(postal, address) === 'unknown') warnings.push('配送地域未判定');
@@ -1077,6 +1132,7 @@ function importOrderCsvRows(rows) {
       missingHeaders: [],
       detectedHeaders: headers,
       allOrders: [],
+      preview: buildOrderImportPreview(headers, 'unknown', rows.length, { failureCount: rows.length }),
     };
   }
   const missingHeaders = getPlatformMissingHeaders(headers, platform);
@@ -1091,21 +1147,28 @@ function importOrderCsvRows(rows) {
       missingHeaders,
       detectedHeaders: headers,
       allOrders: [],
+      preview: buildOrderImportPreview(headers, platform, rows.length, { missingHeaders, failureCount: rows.length }),
     };
   }
   const normalizedOrders = rows.map((row) => normalizePlatformOrderRow(row, platform));
   const validOrders = normalizedOrders.filter(hasStandardOrderFields);
-  const warningDetails = [...new Set(validOrders.flatMap((order) => order.warnings || []))];
+  const warningDetails = [...new Set(normalizedOrders.flatMap((order) => order.warnings || []))];
+  const summary = {
+    missingHeaders: [],
+    warningCount: normalizedOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    failureCount: normalizedOrders.length - validOrders.length,
+  };
   return {
     platform,
     orders: validOrders,
     successCount: validOrders.length,
-    failureCount: normalizedOrders.length - validOrders.length,
-    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    failureCount: summary.failureCount,
+    warningCount: summary.warningCount,
     warningDetails,
     missingHeaders: [],
     detectedHeaders: headers,
     allOrders: normalizedOrders,
+    preview: buildOrderImportPreview(headers, platform, rows.length, summary),
   };
 }
 
@@ -1435,6 +1498,9 @@ function recordOrderImportIssues(importResult, sourceFileName = '') {
           reason: '商品名をSKUとして利用しています。',
         }),
       }));
+    }
+    if ((order.warnings || []).includes('顧客名未設定') || !normalize(order.customer)) {
+      issues.push(appendImportIssue({ type: 'missing_recipient', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'customer', message: '顧客名が見つかりません。' }));
     }
     if ((order.warnings || []).includes('郵便番号未設定') || !normalizePostal(order.postal)) {
       issues.push(appendImportIssue({ type: 'missing_postal', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'postal', message: '郵便番号が見つかりません。' }));
@@ -2129,16 +2195,22 @@ function renderOrders(filter = '') {
 function importShipNaviStandardRows(rows, headers) {
   const orders = rows.map((row) => normalizeOrder({ ...row, sourcePlatform: 'ShipNavi標準' }));
   const validOrders = orders.filter(hasStandardOrderFields);
+  const summary = {
+    missingHeaders: [],
+    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    failureCount: orders.length - validOrders.length,
+  };
   return {
     platform: 'ShipNavi標準',
     orders: validOrders,
     successCount: validOrders.length,
-    failureCount: orders.length - validOrders.length,
+    failureCount: summary.failureCount,
     missingHeaders: [],
-    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    warningCount: summary.warningCount,
     warningDetails: [...new Set(validOrders.flatMap((order) => order.warnings || []))],
     detectedHeaders: headers,
     allOrders: orders,
+    preview: buildOrderImportPreview(headers, 'ShipNavi標準', rows.length, summary),
   };
 }
 
@@ -2181,7 +2253,8 @@ function handleOrderImportFile(file, search) {
     renderOrders(search?.value || '');
     const fileType = (fileResult.sourceType || 'csv').toUpperCase();
     const sheetText = fileResult.sheetName ? ` / シート名: ${fileResult.sheetName}` : '';
-    const message = `取込ファイル種別: ${fileType}${sheetText} / 検出プラットフォーム: ${importResult.platform} / 注文件数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0} / 未解決問題数: ${getOpenImportIssues().length}`;
+    const previewText = importResult.preview ? ` / ${formatOrderImportPreview(importResult.preview)}` : '';
+    const message = `取込ファイル種別: ${fileType}${sheetText} / 検出プラットフォーム: ${importResult.platform} / 注文件数: ${rows.length} / 成功数: ${importResult.successCount} / 失敗数: ${importResult.failureCount} / 警告数: ${importResult.warningCount || 0} / 未解決問題数: ${getOpenImportIssues().length}${previewText}`;
     if (summary) summary.textContent = message;
     showToast(message);
   });

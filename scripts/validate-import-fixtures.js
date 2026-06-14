@@ -500,6 +500,9 @@ async function validateOrderFixtures() {
       assertTruthy(`${platform.expected} normal.${normalCase.label} imports orders`, result.orders.length > 0, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, expected: 'orders.length > 0', actual: result.orders.length });
       const sourcePlatforms = [...new Set(result.orders.map((order) => order.sourcePlatform))];
       assertIncludes(`${platform.expected} normal.${normalCase.label} sourcePlatform is preserved`, sourcePlatforms, platform.expected, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'sourcePlatform' });
+      assertEqual(`${platform.expected} normal.${normalCase.label} preview detects platform`, result.preview?.detectedPlatform, platform.expected, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'preview.detectedPlatform' });
+      assertEqual(`${platform.expected} normal.${normalCase.label} preview row count`, result.preview?.rowCount, normalCase.rows.length, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'preview.rowCount' });
+      assertTruthy(`${platform.expected} normal.${normalCase.label} preview mapped fields are present`, (result.preview?.mappedFields || []).length >= 5, { fixture: path.relative(repoRoot, normalCase.file), platform: platform.expected, field: 'preview.mappedFields', actual: result.preview?.mappedFields });
     }
 
     const wholeEdgeRows = parseCsvFile(edgeFile);
@@ -549,6 +552,9 @@ async function validateOrderFixtures() {
       const edgeDetected = callFunction('detectOrderCsvFormat', [Object.keys(edgeCase.rows[0] || {})]);
       assertEqual(`${platform.expected} edge.${edgeCase.label} detects platform`, edgeDetected, platform.expected, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'headers' });
       const edgeResult = callFunction('importOrderCsvRows', [edgeCase.rows]);
+      assertEqual(`${platform.expected} edge.${edgeCase.label} preview detects platform`, edgeResult.preview?.detectedPlatform, platform.expected, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'preview.detectedPlatform' });
+      assertEqual(`${platform.expected} edge.${edgeCase.label} preview warning count matches result`, edgeResult.preview?.warningCount, edgeResult.warningCount, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'preview.warningCount' });
+      assertTruthy(`${platform.expected} edge.${edgeCase.label} preview includes mapped fields`, (edgeResult.preview?.mappedFields || []).length >= 5, { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'preview.mappedFields', actual: edgeResult.preview?.mappedFields });
       if (edgeResult.warningCount > 0 || edgeResult.failureCount > 0 || edgeResult.missingHeaders?.length) {
         pass(`${platform.expected} edge.${edgeCase.label} produces warning or failure after header location`, {
           fixture: path.relative(repoRoot, edgeCase.file),
@@ -618,6 +624,27 @@ async function validateOrderFixtures() {
       resetImportIssues();
       callFunction('recordOrderImportIssues', [invalidQuantityResult, path.basename(edgeCase.file)]);
       assertIssueType(`${platform.expected} edge.${edgeCase.label} invalid quantity creates persistent issue`, getImportIssuesFromDashboard(), 'invalid_quantity', { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'quantity', expected: 'invalid_quantity issue' });
+
+      const customerHeaders = run(`(platformFieldMappings[${JSON.stringify(platform.expected)}].fieldCandidates.customer || []).flatMap((candidate) => fieldCandidate(candidate).fields)`);
+      const presentCustomerHeaders = customerHeaders.filter((header) => Object.prototype.hasOwnProperty.call(edgeCase.rows[0] || {}, vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx)));
+      const missingRecipientRows = edgeCase.rows.map((row, index) => {
+        if (index !== 0) return row;
+        const next = { ...row };
+        presentCustomerHeaders.forEach((header) => {
+          next[vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx)] = '';
+        });
+        return next;
+      });
+      const missingRecipientResult = callFunction('importOrderCsvRows', [missingRecipientRows]);
+      assertIncludes(`${platform.expected} edge.${edgeCase.label} missing recipient warning`, missingRecipientResult.warningDetails, '顧客名未設定', {
+        fixture: path.relative(repoRoot, edgeCase.file),
+        platform: platform.expected,
+        field: 'customer',
+        expected: '顧客名未設定',
+      });
+      resetImportIssues();
+      callFunction('recordOrderImportIssues', [missingRecipientResult, path.basename(edgeCase.file)]);
+      assertIssueType(`${platform.expected} edge.${edgeCase.label} missing recipient creates persistent issue`, getImportIssuesFromDashboard(), 'missing_recipient', { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'customer', expected: 'missing_recipient issue' });
     }
   }
 
