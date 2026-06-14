@@ -254,11 +254,11 @@ async function validateImportFileReaderLayer() {
 
   const fareCsvResult = await readImportFixtureFile(fareCsv);
   const fareXlsxResult = await readImportFixtureFile(fareXlsx);
-  assertEqual('CSV and XLSX fare rows use same headers', JSON.stringify(Object.keys(fareCsvResult.rows[0] || {})), JSON.stringify(Object.keys(fareXlsxResult.rows[0] || {})), {
+  assertEqual('CSV and XLSX fare matrix raw rows use same title', fareCsvResult.rawRows?.[0]?.[0], fareXlsxResult.rawRows?.[0]?.[0], {
     fixture: path.relative(repoRoot, fareXlsx),
-    field: 'headers',
-    expected: Object.keys(fareCsvResult.rows[0] || {}),
-    actual: Object.keys(fareXlsxResult.rows[0] || {}),
+    field: 'rawRows',
+    expected: fareCsvResult.rawRows?.[0]?.[0],
+    actual: fareXlsxResult.rawRows?.[0]?.[0],
   });
 
   const orderCsv = fixturePath('orders', 'rakuten', 'normal.csv');
@@ -388,23 +388,43 @@ async function validateFareFixtures() {
   ensureFile(edgeFile);
   ensureFile(edgeXlsxFile, 'XLSX fixture');
 
+  const normalCsv = await readImportFixtureFile(normalFile);
+  const normalXlsx = await readImportFixtureFile(normalXlsxFile);
   const normalCases = [
-    { label: 'csv', file: normalFile, rows: parseCsvFile(normalFile) },
-    { label: 'xlsx', file: normalXlsxFile, rows: (await readImportFixtureFile(normalXlsxFile)).rows },
+    { label: 'csv', file: normalFile, rows: normalCsv.rawRows },
+    { label: 'xlsx', file: normalXlsxFile, rows: normalXlsx.rawRows },
   ];
 
   for (const normalCase of normalCases) {
-    const headers = Object.keys(normalCase.rows[0] || {});
+    const headers = Array.isArray(normalCase.rows[0]) ? normalCase.rows[0] : Object.keys(normalCase.rows[0] || {});
     const format = callFunction('detectFareTableFormat', [headers, normalCase.rows]);
     assertEqual(`fare-matrix-normal.${normalCase.label} is detected as matrix`, format, 'matrix', { fixture: path.relative(repoRoot, normalCase.file), field: 'headers' });
     const normalized = callFunction('normalizeFareMatrix', [normalCase.rows, 'ヤマト', '宅急便']);
     assertTruthy(`fare-matrix-normal.${normalCase.label} creates normalizedFareRows`, normalized.length > 0, { fixture: path.relative(repoRoot, normalCase.file), expected: 'normalizedFareRows.length > 0', actual: normalized.length });
     const matrixView = callFunction('createMatrixView', [normalCase.rows, 'ヤマト', '宅急便']);
     assertTruthy(`fare-matrix-normal.${normalCase.label} creates matrixView and normalizedFareRows`, matrixView && matrixView.rows && normalized.length > 0, { fixture: path.relative(repoRoot, normalCase.file), expected: 'matrixView + normalizedFareRows', actual: { matrixRows: matrixView?.rows?.length || 0, normalizedRows: normalized.length } });
+    assertEqual(`fare-matrix-normal.${normalCase.label} infers Yamato service default`, `${matrixView.carrier}/${matrixView.service}`, 'ヤマト/宅急便', { field: 'carrier/service' });
     setData('shipnaviDashboardFareTables', { matrixView, normalizedFareRows: normalized });
     const options = callFunction('getFareOptions', [60, '東京', 1000]);
     assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows are usable by getFareOptions`, options.length > 0, { fixture: path.relative(repoRoot, normalCase.file), field: 'getFareOptions', expected: 'options.length > 0', actual: options.length });
   }
+
+  setData('shipnaviDashboardFareTables', { matrixView: null, normalizedFareRows: [
+    { carrier: '佐川', service: '飛脚宅配便', size: '60', zone: '東京', fare: '990', weightLimit: '2000' },
+  ] });
+  const realMatrixView = callFunction('createMatrixView', [normalCsv.rawRows, 'ヤマト', '宅急便']);
+  const realMatrixRows = callFunction('normalizeFareMatrix', [normalCsv.rawRows, 'ヤマト', '宅急便']);
+  callFunction('mergeImportedFareTable', [realMatrixView, realMatrixRows]);
+  let fareState = callFunction('getFareTableState', []);
+  assertTruthy('real matrix import appends new carrier without replacing unrelated carrier', fareState.normalizedFareRows.some((fare) => fare.carrier === '佐川') && fareState.normalizedFareRows.some((fare) => fare.carrier === 'ヤマト'), { field: 'normalizedFareRows', actual: [...new Set(fareState.normalizedFareRows.map((fare) => fare.carrier))] });
+  assertTruthy('real matrix import preserves matrixView tables', (fareState.matrixView?.tables || []).some((table) => table.carrier === 'ヤマト'), { field: 'matrixView.tables' });
+  const replacementRows = realMatrixRows.map((fare) => (fare.carrier === 'ヤマト' && fare.service === '宅急便' && fare.size === '60' && fare.zone === '東京' ? { ...fare, fare: '777' } : fare));
+  callFunction('mergeImportedFareTable', [realMatrixView, replacementRows]);
+  fareState = callFunction('getFareTableState', []);
+  const yamatoTokyo60 = fareState.normalizedFareRows.filter((fare) => fare.carrier === 'ヤマト' && fare.service === '宅急便' && fare.size === '60' && fare.zone === '東京');
+  assertEqual('same carrier/service matrix import replaces only that fare scope', yamatoTokyo60.length, 1, { field: 'normalizedFareRows' });
+  assertEqual('same carrier/service replacement updates imported fare', yamatoTokyo60[0]?.fare, '777', { field: 'fare' });
+  assertTruthy('same carrier/service replacement keeps unrelated carrier fares', fareState.normalizedFareRows.some((fare) => fare.carrier === '佐川'), { field: 'carrier' });
 
   const wholeEdgeRows = parseCsvFile(edgeFile);
   const edgeHeaders = Object.keys(wholeEdgeRows[0] || {});
@@ -698,17 +718,18 @@ async function validateImportTemplates() {
     { type: 'products', format: 'xlsx', headers: ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否'], exampleSku: 'SKU-001' },
     { type: 'orders', format: 'csv', headers: ['注文番号', '顧客名', '郵便番号', '配送先住所', 'SKU', '数量'], exampleSku: 'SKU-001' },
     { type: 'orders', format: 'xlsx', headers: ['注文番号', '顧客名', '郵便番号', '配送先住所', 'SKU', '数量'], exampleSku: 'SKU-001' },
-    { type: 'fares', format: 'csv', headers: ['サイズ', '重量', '東京', '関東', '関西'], exampleSku: '60' },
-    { type: 'fares', format: 'xlsx', headers: ['サイズ', '重量', '東京', '関東', '関西'], exampleSku: '60' },
+    { type: 'fares', format: 'csv', headers: ['ヤマト運輸 宅急便', '着地', '北海道', '関東', '東京', '３辺合計(cm)', '重量(kg)'], exampleSku: '60', matrixTemplate: true },
+    { type: 'fares', format: 'xlsx', headers: ['ヤマト運輸 宅急便', '着地', '北海道', '関東', '東京', '３辺合計(cm)', '重量(kg)'], exampleSku: '60', matrixTemplate: true },
   ];
 
   for (const testCase of cases) {
     const template = callFunction('generateImportTemplate', [testCase.type, testCase.format]);
     assertEqual(`${testCase.type} ${testCase.format} template has no errors`, template.errors.length, 0, { field: 'errors' });
     assertTruthy(`${testCase.type} ${testCase.format} template has file name`, template.fileName && template.fileName.endsWith(`.${testCase.format}`), { field: 'fileName', actual: template.fileName });
-    const headers = template.rows[0] || [];
-    testCase.headers.forEach((header) => assertIncludes(`${testCase.type} ${testCase.format} template header ${header}`, headers, header, { field: 'headers' }));
-    assertTruthy(`${testCase.type} ${testCase.format} template has example row`, (template.rows[1] || []).includes(testCase.exampleSku), { field: 'example row', actual: template.rows[1] });
+    const templateValues = testCase.matrixTemplate ? template.rows.flat() : (template.rows[0] || []);
+    testCase.headers.forEach((header) => assertIncludes(`${testCase.type} ${testCase.format} template header ${header}`, templateValues, header, { field: 'headers' }));
+    const exampleValues = testCase.matrixTemplate ? template.rows.flat() : (template.rows[1] || []);
+    assertTruthy(`${testCase.type} ${testCase.format} template has example row`, exampleValues.includes(testCase.exampleSku), { field: 'example row', actual: exampleValues });
 
     if (testCase.format === 'csv') {
       const parsedRows = parseCsvText(template.csvText);
@@ -722,7 +743,14 @@ async function validateImportTemplates() {
       const parsed = await vm.runInContext('parseXlsxArrayBuffer(__templateBuffer)', ctx);
       const parsedHeaders = Object.keys(parsed.rows[0] || {});
       assertTruthy(`${testCase.type} xlsx template can be parsed for upload`, parsed.rows.length > 0, { field: 'rows', actual: parsed.rows.length });
-      testCase.headers.forEach((header) => assertIncludes(`${testCase.type} xlsx parsed header ${header}`, parsedHeaders, vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx), { field: 'headers' }));
+      if (testCase.matrixTemplate) {
+        const parsedValues = (parsed.rawRows || []).flat();
+        testCase.headers.forEach((header) => assertIncludes(`${testCase.type} xlsx parsed matrix value ${header}`, parsedValues, header, { field: 'rawRows' }));
+        const matrixView = callFunction('createMatrixView', [parsed.rawRows, 'ヤマト', '宅急便']);
+        assertTruthy(`${testCase.type} xlsx template parses as real matrix`, matrixView?.rows?.length > 0, { field: 'matrixView' });
+      } else {
+        testCase.headers.forEach((header) => assertIncludes(`${testCase.type} xlsx parsed header ${header}`, parsedHeaders, vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx), { field: 'headers' }));
+      }
     }
   }
 
@@ -815,6 +843,8 @@ function extractDashboardVisibleText() {
 
 function validateUiTextScan() {
   const htmlFiles = fs.readdirSync(repoRoot).filter((file) => file.endsWith('.html')).map((file) => path.join(repoRoot, file));
+  const ordersHtml = readText(path.join(repoRoot, 'orders.html'));
+  assertEqual('orders page duplicate Excel import section removed', (ordersHtml.match(/注文Excel取込/g) || []).length, 0, { fixture: 'orders.html' });
   const visibleTexts = [
     ...htmlFiles.flatMap((file) => extractHtmlVisibleText(file).map((text) => ({ file: path.relative(repoRoot, file), text }))),
     ...extractDashboardVisibleText().map((text) => ({ file: 'assets/dashboard.js', text })),
