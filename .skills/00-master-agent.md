@@ -29,6 +29,28 @@ Use these canonical documents instead of creating duplicate governance directori
 - `docs/ARCHITECTURE.md` for runtime flow and protected architecture notes.
 - `docs/TESTING.md` for the fare/import/dashboard/P0 review checklist.
 
+## Required project skills
+
+At startup for ShipNavi repository work, read this master workflow and then read
+the applicable project skills below. For broad planning, review, release,
+governance, or phase-transition work, read all skills `01` through `14` before
+reporting or editing.
+
+- `.skills/01-project-governance.md`
+- `.skills/02-shipping-engine.md`
+- `.skills/03-import-engine.md`
+- `.skills/04-platform-adapters.md`
+- `.skills/05-validation-engine.md`
+- `.skills/06-japanese-ui.md`
+- `.skills/07-mobile-admin.md`
+- `.skills/08-real-data-testing.md`
+- `.skills/09-data-migration.md`
+- `.skills/10-project-memory.md`
+- `.skills/11-ai-reviewer.md`
+- `.skills/12-performance.md`
+- `.skills/13-security.md`
+- `.skills/14-release-manager.md`
+
 ## Standard checks
 
 Before finalizing changes, run:

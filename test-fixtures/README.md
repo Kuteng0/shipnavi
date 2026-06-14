@@ -68,3 +68,15 @@ These fixtures are intended to validate:
 - Do not add real customer personal information.
 - Do not add real names, phone numbers, emails, or detailed addresses.
 - Do not replace these with mock schemas unrelated to real marketplace exports.
+
+## Revised Phase8 shipment queue fixture use
+
+The existing anonymized order fixtures remain the CSV source of truth for shipment queue validation. Normal fixtures validate shippable imported orders, while edge-case fixtures validate queue exception behavior such as 保留 and エラー through missing recipient, missing postal, malformed quantity, missing SKU fallback, alternate recipient, alternate SKU, split address, and combined address rows. Generated XLSX fixtures must continue to be produced from these CSV sources and must not be committed.
+
+## Revised Phase8 shipment export fixture use
+
+Shipment export validation uses the existing anonymized order, product, and fare fixture shapes as source data. The validator seeds exportable, 保留, and エラー shipment rows from dummy fixture values, verifies the CSV field contract, and confirms generated XLSX fixtures remain derived from CSV source files only.
+
+## Revised Phase8 shipment results fixture use
+
+Shipment results validation reuses anonymized fixture-shaped orders, products, and fare rows to seed shipped, 保留, and エラー states. The validator checks carrier/status/savings summaries without adding real customer data or changing CSV source-of-truth policy.

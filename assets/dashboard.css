@@ -401,6 +401,16 @@ tr:last-child td {
   background: #fff4df;
 }
 
+.badge.red {
+  color: #b42318;
+  background: #fee4e2;
+}
+
+.badge.blue {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;

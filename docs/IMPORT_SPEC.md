@@ -144,6 +144,169 @@ Planned mapping target:
 
 メルカリShops support should include explicit warnings when SKU is unavailable and product name is used as fallback.
 
+### 3.9 Phase7 order-recipient validation
+
+Phase7 order import enhancement must create a persistent `missing_recipient` issue when the mapped customer / recipient field is blank. This applies to every supported order platform and should use Japanese operator guidance:
+
+- 顧客名が見つかりません。
+
+Rows without a customer remain failed imports because `customer` is a canonical order field, but the failure must not be silent.
+
+### 3.10 Phase7 order import preview
+
+Order imports should expose preview metadata before or alongside the import summary so operators can confirm:
+
+- detected platform.
+- imported row count.
+- mapped fields for order number, customer, postal code, address, SKU, and quantity.
+- missing fields.
+- warning count.
+
+Preview text shown in the dashboard must remain Japanese and must not replace persistent issue creation.
+
+### 3.11 Phase7 unsupported order format guidance
+
+When an order file cannot be matched to a supported platform, the dashboard must show Japanese next-step guidance with:
+
+- detected headers.
+- missing standard concepts such as 注文番号, 顧客名, 配送先住所, SKU, and 数量.
+- guidance to rename columns to the ShipNavi standard template.
+- guidance to include 商品名 when 商品コード / SKU is unavailable.
+
+This guidance must also be recorded as a persistent import issue so unsupported files do not fail silently.
+
+### 3.12 Phase7 platform field specifications
+
+The following tables are the canonical documented field specifications for supported Phase7 order platforms. They must stay aligned with the runtime `platformFieldMappings` in `assets/dashboard.js`; `scripts/validate-import-fixtures.js` validates these tables against runtime mappings.
+
+<!-- phase7-platform-spec:start ShipNavi標準 -->
+#### ShipNavi標準
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `orderno`; `customer`; `address`; `sku`; `quantity` |
+| `optionalSignals` | platform detection optional | `postal`; `sourceplatform`; `注文番号`; `顧客名`; `郵便番号`; `配送先住所`; `数量` |
+| `orderNo` | required | `orderNo`; `注文番号` |
+| `customer` | required | `customer`; `顧客名` |
+| `postal` | optional | `postal`; `郵便番号` |
+| `address` | required | `address`; `配送先住所` |
+| `sku` | required | `sku`; `SKU` |
+| `productName` | fallback |  |
+| `quantity` | required | `quantity`; `数量` |
+<!-- phase7-platform-spec:end ShipNavi標準 -->
+
+<!-- phase7-platform-spec:start 楽天 -->
+#### 楽天
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `注文番号`; `個数` |
+| `optionalSignals` | platform detection optional | `注文者名字`; `注文者名前`; `送付先氏名`; `代替受取人`; `送付先郵便番号`; `送付先住所:都道府県`; `送付先住所:都市区`; `送付先住所:町以降`; `送付先住所`; `結合住所`; `商品番号`; `商品管理番号`; `代替SKU`; `商品名` |
+| `orderNo` | required | `注文番号` |
+| `customer` | required | `注文者名字 + 注文者名前`; `送付先氏名`; `代替受取人` |
+| `postal` | optional | `送付先郵便番号` |
+| `address` | required | `送付先住所:都道府県 + 送付先住所:都市区 + 送付先住所:町以降`; `送付先住所`; `結合住所` |
+| `sku` | required | `商品番号`; `商品管理番号`; `代替SKU` |
+| `productName` | fallback | `商品名` |
+| `quantity` | required | `個数` |
+<!-- phase7-platform-spec:end 楽天 -->
+
+<!-- phase7-platform-spec:start Yahooショッピング -->
+#### Yahooショッピング
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `注文id`; `数量` |
+| `optionalSignals` | platform detection optional | `お届け先氏名`; `代替受取人`; `郵便番号`; `住所`; `結合住所`; `商品コード`; `代替SKU` |
+| `orderNo` | required | `注文ID` |
+| `customer` | required | `お届け先氏名`; `代替受取人` |
+| `postal` | optional | `郵便番号` |
+| `address` | required | `住所`; `結合住所` |
+| `sku` | required | `商品コード`; `代替SKU` |
+| `productName` | fallback | `商品名` |
+| `quantity` | required | `数量` |
+<!-- phase7-platform-spec:end Yahooショッピング -->
+
+<!-- phase7-platform-spec:start Amazon -->
+#### Amazon
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `order-id`; `quantity-purchased` |
+| `optionalSignals` | platform detection optional | `buyer-email`; `recipient-name`; `代替受取人`; `ship-postal-code`; `ship-state`; `ship-city`; `ship-address-1`; `結合住所`; `sku`; `代替SKU`; `product-name` |
+| `orderNo` | required | `order-id` |
+| `customer` | required | `buyer-email`; `recipient-name`; `代替受取人` |
+| `postal` | optional | `ship-postal-code` |
+| `address` | required | `ship-state + ship-city + ship-address-1`; `ship-state + ship-city`; `結合住所` |
+| `sku` | required | `sku`; `代替SKU` |
+| `productName` | fallback | `product-name` |
+| `quantity` | required | `quantity-purchased` |
+<!-- phase7-platform-spec:end Amazon -->
+
+<!-- phase7-platform-spec:start Shopify -->
+#### Shopify
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `name`; `lineitem quantity` |
+| `optionalSignals` | platform detection optional | `shipping name`; `代替受取人`; `shipping zip`; `shipping province`; `shipping city`; `shipping address1`; `結合住所`; `lineitem sku`; `代替SKU` |
+| `orderNo` | required | `Name` |
+| `customer` | required | `Shipping Name`; `代替受取人` |
+| `postal` | optional | `Shipping Zip` |
+| `address` | required | `Shipping Province + Shipping City + Shipping Address1`; `Shipping Province + Shipping City`; `Shipping Address1`; `結合住所` |
+| `sku` | required | `Lineitem sku`; `代替SKU` |
+| `productName` | fallback | `Lineitem name` |
+| `quantity` | required | `Lineitem quantity` |
+<!-- phase7-platform-spec:end Shopify -->
+
+<!-- phase7-platform-spec:start BASE -->
+#### BASE
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `注文id`; `数量` |
+| `optionalSignals` | platform detection optional | `購入者名`; `代替受取人`; `郵便番号`; `住所`; `結合住所`; `商品コード`; `代替SKU` |
+| `orderNo` | required | `注文ID` |
+| `customer` | required | `購入者名`; `代替受取人` |
+| `postal` | optional | `郵便番号` |
+| `address` | required | `住所`; `結合住所` |
+| `sku` | required | `商品コード`; `代替SKU` |
+| `productName` | fallback | `商品名` |
+| `quantity` | required | `数量` |
+<!-- phase7-platform-spec:end BASE -->
+
+<!-- phase7-platform-spec:start STORES -->
+#### STORES
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `オーダー番号`; `数量` |
+| `optionalSignals` | platform detection optional | `購入者名`; `代替受取人`; `郵便番号`; `都道府県`; `市区町村`; `住所1`; `結合住所`; `品番`; `品番候補`; `代替SKU` |
+| `orderNo` | required | `オーダー番号` |
+| `customer` | required | `購入者名`; `代替受取人` |
+| `postal` | optional | `郵便番号` |
+| `address` | required | `都道府県 + 市区町村 + 住所1`; `都道府県 + 市区町村`; `住所1`; `結合住所` |
+| `sku` | required | `品番`; `品番候補`; `代替SKU` |
+| `productName` | fallback | `商品名` |
+| `quantity` | required | `数量` |
+<!-- phase7-platform-spec:end STORES -->
+
+<!-- phase7-platform-spec:start メルカリShops -->
+#### メルカリShops
+
+| Runtime item | Required / optional | Candidates |
+| --- | --- | --- |
+| `requiredSignals` | platform detection required | `取引id`; `数量` |
+| `optionalSignals` | platform detection optional | `お届け先氏名`; `代替受取人`; `郵便番号`; `お届け先住所`; `結合住所`; `商品コード`; `商品コード候補`; `代替SKU` |
+| `orderNo` | required | `取引ID` |
+| `customer` | required | `お届け先氏名`; `代替受取人` |
+| `postal` | optional | `郵便番号` |
+| `address` | required | `お届け先住所`; `結合住所` |
+| `sku` | required | `商品コード`; `商品コード候補`; `代替SKU` |
+| `productName` | fallback | `商品名` |
+| `quantity` | required | `数量` |
+<!-- phase7-platform-spec:end メルカリShops -->
+
 ## 4. Product master import mapping
 
 Product import should map the following logical fields:
@@ -375,3 +538,46 @@ Template requirements:
 - Include sample rows with safe dummy data.
 - Include expected warnings for missing SKU, missing weight, and unsupported zones.
 - Version templates so operators know which template matches the current importer.
+
+## 9. Revised Phase8 shipment queue fields
+
+Shipment Workflow MVP adds an internal `shipmentStatus` value to normalized order rows. Supported values are:
+
+| Value | Japanese label | Meaning |
+| --- | --- | --- |
+| `imported` | 取込済み | Order was imported and has not yet been reviewed for shipment. |
+| `pending` | 確認待ち | Operator review is required before shipment preparation. |
+| `ready` | 出荷準備中 | Shipment is ready for preparation. |
+| `shipped` | 出荷済み | Shipment has been completed manually by the operator. |
+| `on_hold` | 保留 | Shipment is blocked by a non-critical issue or missing recommendation data. |
+| `error` | エラー | Shipment is blocked by a critical import warning such as missing recipient, postal, zone, or quantity data. |
+
+`shipmentStatus` is not a marketplace-required import column in Phase8. It is normalized internally for the shipment queue and defaults to `imported` when absent. The shipment queue may derive `on_hold` or `error` for display when unresolved order warnings or blocking recommendation issues exist.
+
+## 10. Revised Phase8 shipment export fields
+
+Shipment Export MVP adds a CSV export on the 出荷キュー page. The export is generated from the existing shipment queue rows and existing order rows; it does not introduce a new import schema, LocalStorage key, carrier API, tracking API, or label API.
+
+Default export behavior:
+
+- Rows with derived shipment status `error` / エラー are excluded.
+- Rows with derived shipment status `on_hold` / 保留 are excluded.
+- Exportable statuses are `imported`, `pending`, `ready`, and `shipped`.
+- Shipment grouping remains provided by `getShipmentOrderGroups`; export only flattens the current shipment group rows into CSV records.
+
+CSV columns:
+
+| Column | Source |
+| --- | --- |
+| 出荷グループ | Shipment queue group ID such as `SG-001`. |
+| 注文番号 | Normalized order number. |
+| 顧客名 | Normalized customer / recipient name. |
+| 郵便番号 | Normalized destination postal code. |
+| 配送先住所 | Normalized destination address. |
+| SKU | Normalized SKU. |
+| 数量 | Normalized quantity. |
+| 推奨配送会社 | Current recommended carrier from the shipment queue row. |
+| 推奨サービス | Current recommended service from the shipment queue row. |
+| 出荷状態 | Japanese shipment status label. |
+
+Export Preview displays 出荷対象件数, 保留件数, エラー件数, and 配送会社別件数 before download. These counts are derived from the same queue rows as the export so operators can confirm blocked shipments are not included by default.
