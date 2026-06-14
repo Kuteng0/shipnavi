@@ -144,6 +144,14 @@ Planned mapping target:
 
 メルカリShops support should include explicit warnings when SKU is unavailable and product name is used as fallback.
 
+### 3.9 Phase7 order-recipient validation
+
+Phase7 order import enhancement must create a persistent `missing_recipient` issue when the mapped customer / recipient field is blank. This applies to every supported order platform and should use Japanese operator guidance:
+
+- 顧客名が見つかりません。
+
+Rows without a customer remain failed imports because `customer` is a canonical order field, but the failure must not be silent.
+
 ## 4. Product master import mapping
 
 Product import should map the following logical fields:
