@@ -311,6 +311,7 @@ Reserved UI copy:
 - 今後のバージョンで対応予定です。
 
 ## 8. Template download requirements
+## 7. Template download requirements
 
 Template download is required for Phase 6.
 

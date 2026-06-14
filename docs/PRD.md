@@ -164,6 +164,7 @@ Phase6 では、取込エラーや警告を一度だけ toast で表示して終
 
 
 ### 3.9 日语后台
+### 3.8 日语后台
 
 The dashboard is intended for Japanese operations teams and should keep Japanese labels, messages, and domain terms.
 
@@ -182,6 +183,7 @@ Phase6 UI language acceptance:
 - 置換後文言: 商品マスタ、不足している項目、CSV出力、推奨配送方法、削減見込み額、取込元プラットフォーム。
 
 ### 3.10 手机端管理
+### 3.9 手机端管理
 
 The dashboard includes a responsive app navigation toggle and should remain usable on mobile devices for lightweight operations review.
 
@@ -234,6 +236,17 @@ CSV / Excel 取込時に、ユーザーが修正すべき問題を自動検出�
 - 自動修正する場合も、保存前に必ずユーザー確認を行う。
 - 元ファイルは上書きしない。
 - 修正後データは CSV / Excel として再出力できるようにする。
+### 3.10 未来 AI 导入修复助手
+
+Future versions should include an AI-assisted import repair workflow for unsupported or partially mapped files.
+
+Target capabilities:
+
+- Detect unmapped headers and suggest field mappings.
+- Explain missing required fields in Japanese.
+- Suggest CSV transformations or template downloads.
+- Generate a preview before applying repaired mappings.
+- Learn reusable mappings per tenant or shop after operator approval.
 
 ## 4. Success metrics
 

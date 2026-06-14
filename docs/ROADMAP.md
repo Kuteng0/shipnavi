@@ -201,6 +201,16 @@ Scope:
 - Apply automatic fixes only after explicit user confirmation.
 - Keep the original uploaded file unchanged.
 - Allow corrected data to be re-exported as CSV / Excel.
+## Phase 10: AI 导入修复助手
+
+Goal: help operators repair unsupported CSV/Excel imports without hiding risky data transformations.
+
+Scope:
+
+- Suggest field mappings for unknown headers.
+- Explain missing fields and suspicious values in Japanese.
+- Propose transformations such as combining address fields or converting weight units.
+- Generate a preview before applying repaired mappings.
 - Save approved mappings per tenant and platform.
 - Provide confidence and rationale for each AI suggestion.
 
