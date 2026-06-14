@@ -1036,6 +1036,7 @@ function normalizePlatformOrderRow(row, platform) {
   const numericQuantity = toNumber(rawQuantity);
   const warnings = [];
 
+  if (!customer) warnings.push('顧客名未設定');
   if (!postal) warnings.push('郵便番号未設定');
   if (postal && !isValidPostalFormat(postal)) warnings.push('郵便番号形式不正');
   if (postal && isValidPostalFormat(postal) && getZoneByPostal(postal, address) === 'unknown') warnings.push('配送地域未判定');
@@ -1095,13 +1096,13 @@ function importOrderCsvRows(rows) {
   }
   const normalizedOrders = rows.map((row) => normalizePlatformOrderRow(row, platform));
   const validOrders = normalizedOrders.filter(hasStandardOrderFields);
-  const warningDetails = [...new Set(validOrders.flatMap((order) => order.warnings || []))];
+  const warningDetails = [...new Set(normalizedOrders.flatMap((order) => order.warnings || []))];
   return {
     platform,
     orders: validOrders,
     successCount: validOrders.length,
     failureCount: normalizedOrders.length - validOrders.length,
-    warningCount: validOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
+    warningCount: normalizedOrders.reduce((sum, order) => sum + (order.warnings?.length || 0), 0),
     warningDetails,
     missingHeaders: [],
     detectedHeaders: headers,
@@ -1435,6 +1436,9 @@ function recordOrderImportIssues(importResult, sourceFileName = '') {
           reason: '商品名をSKUとして利用しています。',
         }),
       }));
+    }
+    if ((order.warnings || []).includes('顧客名未設定') || !normalize(order.customer)) {
+      issues.push(appendImportIssue({ type: 'missing_recipient', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'customer', message: '顧客名が見つかりません。' }));
     }
     if ((order.warnings || []).includes('郵便番号未設定') || !normalizePostal(order.postal)) {
       issues.push(appendImportIssue({ type: 'missing_postal', sourceFlow: 'order_import', sourceFileName, sourcePlatform: order.sourcePlatform, rowNumber, field: 'postal', message: '郵便番号が見つかりません。' }));

@@ -618,6 +618,27 @@ async function validateOrderFixtures() {
       resetImportIssues();
       callFunction('recordOrderImportIssues', [invalidQuantityResult, path.basename(edgeCase.file)]);
       assertIssueType(`${platform.expected} edge.${edgeCase.label} invalid quantity creates persistent issue`, getImportIssuesFromDashboard(), 'invalid_quantity', { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'quantity', expected: 'invalid_quantity issue' });
+
+      const customerHeaders = run(`(platformFieldMappings[${JSON.stringify(platform.expected)}].fieldCandidates.customer || []).flatMap((candidate) => fieldCandidate(candidate).fields)`);
+      const presentCustomerHeaders = customerHeaders.filter((header) => Object.prototype.hasOwnProperty.call(edgeCase.rows[0] || {}, vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx)));
+      const missingRecipientRows = edgeCase.rows.map((row, index) => {
+        if (index !== 0) return row;
+        const next = { ...row };
+        presentCustomerHeaders.forEach((header) => {
+          next[vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx)] = '';
+        });
+        return next;
+      });
+      const missingRecipientResult = callFunction('importOrderCsvRows', [missingRecipientRows]);
+      assertIncludes(`${platform.expected} edge.${edgeCase.label} missing recipient warning`, missingRecipientResult.warningDetails, '顧客名未設定', {
+        fixture: path.relative(repoRoot, edgeCase.file),
+        platform: platform.expected,
+        field: 'customer',
+        expected: '顧客名未設定',
+      });
+      resetImportIssues();
+      callFunction('recordOrderImportIssues', [missingRecipientResult, path.basename(edgeCase.file)]);
+      assertIssueType(`${platform.expected} edge.${edgeCase.label} missing recipient creates persistent issue`, getImportIssuesFromDashboard(), 'missing_recipient', { fixture: path.relative(repoRoot, edgeCase.file), platform: platform.expected, field: 'customer', expected: 'missing_recipient issue' });
     }
   }
 

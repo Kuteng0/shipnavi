@@ -124,6 +124,12 @@ Confirm:
 
 `test-fixtures/` must include real-format anonymized samples for 楽天, Yahoo, Amazon, Shopify, BASE, STORES, メルカリShops, 商品マスタ, 送料マトリクス, 配送会社, and 注文データ. Each class must cover normal data, missing SKU, missing weight, invalid postal code, invalid region, mismatched column name, unit error, header not on first row, blank rows, extra explanatory rows, ¥ / 円 / comma amounts, mixed g / kg weights, and mixed cm / mm sizes.
 
+### Phase7 order import checks
+
+- Platform order fixtures must validate missing recipient / customer values as persistent `missing_recipient` issues.
+- Missing recipient rows must show Japanese guidance (`顧客名が見つかりません。`) and must not fail silently.
+- Existing missing SKU fallback, postal-code, malformed quantity, platform detection, and `sourcePlatform` checks must remain passing.
+
 ### Phase6 per-step commands
 
 After every Phase6 module, run:
