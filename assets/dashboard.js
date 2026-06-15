@@ -548,13 +548,20 @@ function templateRowsFor(type) {
   const fareRows = [
     ['ヤマト運輸 宅急便'],
     ['着地', '', '北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'],
+    ['都道府県', '', '北海道', '青森県', '宮城県', '茨城県', '東京都', '新潟県', '富山県', '愛知県', '大阪府', '岡山県', '香川県', '福岡県', '沖縄県'],
+    ['都道府県', '', '', '岩手県', '山形県', '栃木県', '', '長野県', '石川県', '岐阜県', '京都府', '広島県', '徳島県', '佐賀県', ''],
+    ['都道府県', '', '', '秋田県', '福島県', '群馬県', '', '', '福井県', '静岡県', '兵庫県', '山口県', '愛媛県', '長崎県', ''],
+    ['都道府県', '', '', '', '', '埼玉県', '', '', '', '三重県', '奈良県', '鳥取県', '高知県', '熊本県', ''],
+    ['都道府県', '', '', '', '', '千葉県', '', '', '', '', '滋賀県', '島根県', '', '大分県', ''],
+    ['都道府県', '', '', '', '', '神奈川県', '', '', '', '', '和歌山県', '', '', '宮崎県', ''],
+    ['都道府県', '', '', '', '', '山梨県', '', '', '', '', '', '', '', '鹿児島県', ''],
     ['３辺合計(cm)', '重量(kg)', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['60', '2', '1350', '1100', '1000', '950', '930', '980', '980', '980', '970', '1050', '1050', '1100', '1350'],
-    ['80', '5', '1680', '1400', '1280', '1180', '1150', '1230', '1230', '1230', '1230', '1320', '1320', '1430', '1680'],
-    ['100', '10', '1980', '1700', '1550', '1450', '1390', '1500', '1500', '1500', '1500', '1600', '1600', '1700', '1980'],
-    ['120', '15', '2300', '2000', '1850', '1700', '1650', '1780', '1780', '1780', '1800', '1900', '1900', '2050', '2300'],
-    ['140', '20', '2650', '2350', '2200', '2050', '1980', '2120', '2120', '2120', '2150', '2250', '2250', '2400', '2650'],
-    ['160', '25', '3100', '2800', '2600', '2450', '2380', '2520', '2520', '2520', '2550', '2680', '2680', '2850', '3100'],
+    ['60', '2', '400', '420', '430', '450', '440', '460', '470', '460', '470', '500', '510', '520', '900'],
+    ['80', '5', '430', '450', '460', '480', '470', '490', '500', '490', '500', '530', '540', '550', '930'],
+    ['100', '10', '500', '520', '530', '550', '540', '560', '570', '560', '570', '600', '610', '620', '1000'],
+    ['120', '15', '600', '620', '630', '650', '640', '660', '670', '660', '670', '700', '710', '720', '1100'],
+    ['140', '20', '700', '720', '730', '750', '740', '760', '770', '760', '770', '800', '810', '820', '1200'],
+    ['160', '25', '800', '820', '830', '850', '840', '860', '870', '860', '870', '900', '910', '920', '1300'],
   ];
   if (type === 'products') return productRows;
   if (type === 'orders') return orderRows;
@@ -863,15 +870,23 @@ function normalizeMatrixView(view) {
     return { ...tables[0], tables };
   }
   const zoneHeaders = Array.isArray(view.zoneHeaders) ? view.zoneHeaders.map((zone) => compactText(zone)).filter(Boolean) : [];
+  const zoneGroups = zoneHeaders.reduce((groups, zone) => {
+    const rawPrefectures = view.zoneGroups?.[zone] || view.prefectures?.[zone] || [];
+    groups[zone] = Array.isArray(rawPrefectures) ? rawPrefectures.map(compactText).filter(Boolean) : [];
+    return groups;
+  }, {});
+  const carrier = normalizeCarrier(view.carrier || 'ヤマト');
   return {
-    carrier: normalizeCarrier(view.carrier || 'ヤマト'),
+    carrier,
+    carrierLabel: compactText(view.carrierLabel || view.titleCarrier || view.displayCarrier || view.carrier || carrier),
     service: normalize(view.service || '宅急便'),
     sizeLabel: compactText(view.sizeLabel || 'サイズ') || 'サイズ',
     weightLabel: compactText(view.weightLabel || '重量') || '重量',
     zoneHeaders,
+    zoneGroups,
     rows: Array.isArray(view.rows) ? view.rows.map((row) => ({
       size: normalizeSize(row?.size),
-      weight: normalize(row?.weight) ? parseWeightLimitValue(row?.weight) : '',
+      weight: normalize(row?.weight),
       fares: Object.fromEntries(zoneHeaders.map((zone) => [zone, normalize(row?.fares?.[zone]) ? String(toNumber(row?.fares?.[zone])) : ''])),
     })).filter((row) => row.size || row.weight || Object.values(row.fares).some((fare) => toNumber(fare) > 0)) : [],
   };
@@ -1651,13 +1666,16 @@ function normalizeProduct(row) {
 }
 
 function normalizeFare(row) {
+  const prefectures = Array.isArray(row.prefectures) ? row.prefectures.map(compactText).filter(Boolean) : [];
   return {
     id: row.id || makeId('rate'),
     carrier: normalizeCarrier(row.carrier),
     service: normalize(row.service),
     size: normalizeSize(row.size),
+    weight: normalize(row.weight || row.weightLimit),
     weightLimit: parseWeightLimitValue(row.weightLimit || row.weight) || '0',
     zone: normalize(row.zone) || 'default',
+    prefectures,
     fare: String(toNumber(row.fare)),
   };
 }
@@ -1696,6 +1714,17 @@ function matrixWeightValue(value, weightLabel) {
   return /kg|キロ/i.test(weightLabel) && !/kg|g|キロ|グラム/i.test(text) ? `${text}kg` : text;
 }
 
+function matrixDisplayCarrier(carrier, label = '') {
+  const display = compactText(label || carrier);
+  if (carrier === 'ヤマト' && display === 'ヤマト') return 'ヤマト運輸';
+  return display || carrier;
+}
+
+function isMatrixPrefectureLabel(value) {
+  const header = normalizeHeader(value);
+  return ['都道府県', '県', '府県', '地域'].includes(header);
+}
+
 function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackService = '宅急便') {
   const rowArrays = rowArraysFromRows(rows).map((row) => row.map(compactText));
   const zoneRowIndex = rowArrays.findIndex((row) => row.some((cell) => normalizeHeader(cell) === '着地'));
@@ -1712,15 +1741,26 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
   if (!zoneEntries.length) return null;
   const title = rowArrays.slice(0, zoneRowIndex).flat().filter(Boolean).join(' ');
   const { carrier, service } = inferMatrixCarrierService(title, fallbackCarrier, fallbackService);
+  const rawCarrierLabel = compactText(title.replace(service, '').trim()) || carrier;
+  const zoneGroups = Object.fromEntries(zoneEntries.map(({ zone, index }) => [
+    zone,
+    rowArrays
+      .slice(zoneRowIndex + 1, headerRowIndex)
+      .map((row) => row[index])
+      .map(compactText)
+      .filter((value) => value && !isMatrixPrefectureLabel(value)),
+  ]));
   return normalizeMatrixView({
     carrier,
+    carrierLabel: matrixDisplayCarrier(carrier, rawCarrierLabel),
     service,
     sizeLabel: headerRow[sizeIndex] || 'サイズ',
     weightLabel: headerRow[weightIndex] || '重量',
     zoneHeaders: zoneEntries.map(({ zone }) => zone),
+    zoneGroups,
     rows: rowArrays.slice(headerRowIndex + 1).map((row) => ({
       size: row[sizeIndex],
-      weight: matrixWeightValue(row[weightIndex], headerRow[weightIndex]),
+      weight: row[weightIndex],
       fares: Object.fromEntries(zoneEntries.map(({ zone, index }) => [zone, row[index] || ''])),
     })),
   });
@@ -1767,8 +1807,10 @@ function normalizeFareMatrix(matrixInput, carrierName = 'ヤマト', serviceName
     carrier: matrixView.carrier,
     service: matrixView.service,
     size: row.size,
-    weightLimit: row.weight,
+    weight: row.weight,
+    weightLimit: matrixWeightValue(row.weight, matrixView.weightLabel),
     zone,
+    prefectures: matrixView.zoneGroups?.[zone] || [],
     fare: row.fares?.[zone],
   }))).filter((fare) => fare.size && fare.zone && toNumber(fare.fare) > 0);
 }
@@ -1779,6 +1821,21 @@ function getProductsBySku() {
 
 function getFareRows() {
   return getFareTableState().normalizedFareRows;
+}
+
+function getZoneByFareGroups(address = '') {
+  const normalizedAddress = normalize(address);
+  if (!normalizedAddress) return '';
+  const match = getFareRows()
+    .map(normalizeFare)
+    .find((fare) => fare.zone && fare.zone !== 'default' && fare.prefectures?.some((prefecture) => normalizedAddress.includes(prefecture)));
+  return match?.zone || '';
+}
+
+function getShipmentFareZone(postal, address = '') {
+  const zone = getZoneByPostal(postal, address);
+  if (zone !== 'unknown') return zone;
+  return getZoneByFareGroups(address) || zone;
 }
 
 function getDataHealth() {
@@ -1955,7 +2012,7 @@ function buildShipmentGroup(orders, index, productsBySku = getProductsBySku()) {
 
   const isBundled = orders.length > 1;
   const estimatedSize = missingProduct ? null : (isBundled ? estimateBundledSize(totalVolume, largestItemSize) : largestItemSize);
-  const zone = getZoneByPostal(orders[0]?.postal, orders[0]?.address);
+  const zone = getShipmentFareZone(orders[0]?.postal, orders[0]?.address);
   const fareOptions = missingProduct ? [] : getFareOptions(estimatedSize, zone, totalWeight);
   const best = fareOptions[0] || null;
   const second = fareOptions[1] || null;
@@ -2164,18 +2221,19 @@ function initProducts() {
   });
 }
 
-function getMatrixEditorState() {
+function getMatrixEditorState(tableIndex = 0) {
   const currentMatrix = getFareTableState().matrixView;
   if (!currentMatrix) return null;
-  const currentTable = getMatrixTables(currentMatrix)[0] || currentMatrix;
+  const currentTable = getMatrixTables(currentMatrix)[tableIndex] || currentMatrix;
   return normalizeMatrixView({
     ...currentTable,
-    carrier: document.querySelector('#matrix-carrier')?.value || currentTable.carrier,
-    service: document.querySelector('#matrix-service')?.value || currentTable.service,
+    carrier: document.querySelector(`[data-matrix-carrier="${tableIndex}"]`)?.value || currentTable.carrier,
+    carrierLabel: document.querySelector(`[data-matrix-carrier="${tableIndex}"]`)?.value || currentTable.carrierLabel || currentTable.carrier,
+    service: document.querySelector(`[data-matrix-service="${tableIndex}"]`)?.value || currentTable.service,
     rows: currentTable.rows.map((row, rowIndex) => ({
-      size: document.querySelector(`[data-matrix-size="${rowIndex}"]`)?.value || row.size,
-      weight: document.querySelector(`[data-matrix-weight="${rowIndex}"]`)?.value || row.weight,
-      fares: Object.fromEntries(currentTable.zoneHeaders.map((zone, zoneIndex) => [zone, document.querySelector(`[data-matrix-fare="${rowIndex}"][data-zone-index="${zoneIndex}"]`)?.value || ''])),
+      size: document.querySelector(`[data-matrix-size="${tableIndex}-${rowIndex}"]`)?.value || row.size,
+      weight: document.querySelector(`[data-matrix-weight="${tableIndex}-${rowIndex}"]`)?.value || row.weight,
+      fares: Object.fromEntries(currentTable.zoneHeaders.map((zone, zoneIndex) => [zone, document.querySelector(`[data-matrix-fare="${tableIndex}-${rowIndex}"][data-zone-index="${zoneIndex}"]`)?.value || ''])),
     })),
   });
 }
@@ -2201,42 +2259,65 @@ function saveMatrixEditorState(nextMatrix) {
   mergeImportedFareTable(nextMatrix, normalizeFareMatrix(nextMatrix));
 }
 
+function deleteFareTableByScope(carrier, service) {
+  const removeKey = fareScopeKey(carrier, service);
+  const currentState = getFareTableState();
+  const nextRows = currentState.normalizedFareRows.filter((fare) => fareScopeKey(fare.carrier, fare.service) !== removeKey);
+  const nextTables = getMatrixTables(currentState.matrixView).filter((table) => fareScopeKey(table.carrier, table.service) !== removeKey);
+  const nextMatrixView = makeMatrixViewState(nextTables);
+  setFareTableState(nextMatrixView, nextRows);
+  setData('carriers', nextRows);
+  return { matrixView: nextMatrixView, normalizedFareRows: nextRows };
+}
+
 function renderCarriers(filter = '') {
   const tbody = document.querySelector('#carriers-table');
   if (!tbody) return;
   const keyword = filter.toLowerCase();
   const fareState = getFareTableState();
-  if (fareState.matrixView?.rows?.length) {
-    const matrix = fareState.matrixView;
-    const matchesFilter = !keyword || `${matrix.carrier} ${matrix.service} ${matrix.zoneHeaders.join(' ')}`.toLowerCase().includes(keyword);
-    if (!matchesFilter) {
+  const matrixTables = getMatrixTables(fareState.matrixView);
+  if (matrixTables.length) {
+    const matchingTables = matrixTables
+      .map((matrix, tableIndex) => ({ matrix, tableIndex }))
+      .filter(({ matrix }) => !keyword || `${matrix.carrier} ${matrix.carrierLabel} ${matrix.service} ${matrix.zoneHeaders.join(' ')} ${Object.values(matrix.zoneGroups || {}).flat().join(' ')}`.toLowerCase().includes(keyword));
+    if (!matchingTables.length) {
       tbody.innerHTML = '<tr><td colspan="6">該当する運賃表がありません。</td></tr>';
       return;
     }
-    const zoneHeaderCells = matrix.zoneHeaders.map((zone) => `<th>${escapeHtml(zone)}</th>`).join('');
-    const matrixRows = matrix.rows.map((row, rowIndex) => `
-      <tr>
-        <td><input class="matrix-cell-input" data-matrix-size="${rowIndex}" value="${escapeHtml(row.size)}" /></td>
-        <td><input class="matrix-cell-input" data-matrix-weight="${rowIndex}" value="${escapeHtml(row.weight)}" /></td>
-        ${matrix.zoneHeaders.map((zone, zoneIndex) => `<td><input class="matrix-cell-input money-input" inputmode="numeric" data-matrix-fare="${rowIndex}" data-zone-index="${zoneIndex}" value="${escapeHtml(row.fares?.[zone] || '')}" /></td>`).join('')}
-      </tr>
-    `).join('');
-    tbody.innerHTML = `
+    tbody.innerHTML = matchingTables.map(({ matrix, tableIndex }) => {
+      const zoneHeaderCells = matrix.zoneHeaders.map((zone) => `<th>${escapeHtml(zone)}</th>`).join('');
+      const prefectureCells = matrix.zoneHeaders.map((zone) => {
+        const prefectures = matrix.zoneGroups?.[zone] || [];
+        return `<th class="matrix-prefectures">${prefectures.map(escapeHtml).join('<br>')}</th>`;
+      }).join('');
+      const matrixRows = matrix.rows.map((row, rowIndex) => `
+        <tr>
+          <td><input class="matrix-cell-input" data-matrix-size="${tableIndex}-${rowIndex}" value="${escapeHtml(row.size)}" /></td>
+          <td><input class="matrix-cell-input" data-matrix-weight="${tableIndex}-${rowIndex}" value="${escapeHtml(row.weight)}" /></td>
+          ${matrix.zoneHeaders.map((zone, zoneIndex) => `<td><input class="matrix-cell-input money-input" inputmode="numeric" data-matrix-fare="${tableIndex}-${rowIndex}" data-zone-index="${zoneIndex}" value="${escapeHtml(row.fares?.[zone] || '')}" /></td>`).join('')}
+        </tr>
+      `).join('');
+      return `
       <tr>
         <td colspan="6">
           <div class="matrix-editor">
             <div class="matrix-editor-header">
-              <label class="input-group compact-input">配送会社<input id="matrix-carrier" value="${escapeHtml(matrix.carrier)}" /></label>
-              <label class="input-group compact-input">サービス<input id="matrix-service" value="${escapeHtml(matrix.service)}" /></label>
+              <strong class="matrix-editor-title">${escapeHtml(matrixDisplayCarrier(matrix.carrier, matrix.carrierLabel))} / ${escapeHtml(matrix.service)}</strong>
+              <label class="input-group compact-input">配送会社<input data-matrix-carrier="${tableIndex}" value="${escapeHtml(matrixDisplayCarrier(matrix.carrier, matrix.carrierLabel))}" /></label>
+              <label class="input-group compact-input">サービス<input data-matrix-service="${tableIndex}" value="${escapeHtml(matrix.service)}" /></label>
               <div class="row-actions matrix-editor-actions">
-                <button class="small-button" type="button" data-add-fare-matrix-row="true">行を追加</button>
-                <button class="small-button" type="button" data-add-fare-matrix-zone="true">地域列を追加</button>
-                <button class="small-button" type="button" data-save-fare-matrix="true">保存</button>
+                <button class="small-button" type="button" data-add-fare-matrix-row="${tableIndex}">行を追加</button>
+                <button class="small-button" type="button" data-add-fare-matrix-zone="${tableIndex}">地域列を追加</button>
+                <button class="small-button" type="button" data-save-fare-matrix="${tableIndex}">保存</button>
+                <button class="small-button danger" type="button" data-delete-fare-matrix="${tableIndex}">この運賃表を削除</button>
               </div>
             </div>
             <div class="responsive-table matrix-table-wrap">
             <table class="matrix-table">
-              <thead><tr><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${zoneHeaderCells}</tr></thead>
+              <thead>
+                <tr><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${zoneHeaderCells}</tr>
+                <tr><th></th><th></th>${prefectureCells}</tr>
+              </thead>
               <tbody>${matrixRows}</tbody>
             </table>
             </div>
@@ -2244,6 +2325,7 @@ function renderCarriers(filter = '') {
         </td>
       </tr>
     `;
+    }).join('');
     return;
   }
   const fares = fareState.normalizedFareRows.filter((fare) => `${fare.carrier} ${fare.service} ${fare.size} ${fare.zone}`.toLowerCase().includes(keyword));
@@ -2281,8 +2363,10 @@ function initCarriers() {
     }
     const currentMatrix = getFareTableState().matrixView;
     if (!currentMatrix) return;
-    if (event.target.dataset?.addFareMatrixRow) {
-      const editorMatrix = getMatrixEditorState() || currentMatrix;
+    const addRowIndex = event.target.dataset?.addFareMatrixRow;
+    if (addRowIndex !== undefined) {
+      const tableIndex = toNumber(addRowIndex);
+      const editorMatrix = getMatrixEditorState(tableIndex) || getMatrixTables(currentMatrix)[tableIndex] || currentMatrix;
       const lastSize = toNumber(editorMatrix.rows.at(-1)?.size);
       const nextSize = shippingSizes.find((size) => size > lastSize) || '';
       const nextMatrix = normalizeMatrixView({
@@ -2294,22 +2378,37 @@ function initCarriers() {
       showToast('マトリクス行を追加しました。');
       return;
     }
-    if (event.target.dataset?.addFareMatrixZone) {
+    const addZoneIndex = event.target.dataset?.addFareMatrixZone;
+    if (addZoneIndex !== undefined) {
       const zoneName = window.prompt('追加する地域名を入力してください。');
       const normalizedZoneName = compactText(zoneName);
       if (!normalizedZoneName) return;
-      const editorMatrix = getMatrixEditorState() || currentMatrix;
+      const tableIndex = toNumber(addZoneIndex);
+      const editorMatrix = getMatrixEditorState(tableIndex) || getMatrixTables(currentMatrix)[tableIndex] || currentMatrix;
       const nextMatrix = normalizeMatrixView({
         ...editorMatrix,
         zoneHeaders: [...editorMatrix.zoneHeaders, normalizedZoneName],
+        zoneGroups: { ...(editorMatrix.zoneGroups || {}), [normalizedZoneName]: [] },
       });
       saveMatrixEditorState(nextMatrix);
       renderCarriers(search?.value || '');
       showToast('地域列を追加しました。');
       return;
     }
-    if (event.target.dataset?.saveFareMatrix !== 'true') return;
-    const nextMatrix = getMatrixEditorState();
+    const deleteMatrixIndex = event.target.dataset?.deleteFareMatrix;
+    if (deleteMatrixIndex !== undefined) {
+      const table = getMatrixTables(currentMatrix)[toNumber(deleteMatrixIndex)];
+      if (!table) return;
+      const title = `${matrixDisplayCarrier(table.carrier, table.carrierLabel)} / ${table.service}`;
+      if (!window.confirm(`${title} の運賃表を削除します。よろしいですか？`)) return;
+      deleteFareTableByScope(table.carrier, table.service);
+      renderCarriers(search?.value || '');
+      showToast('運賃表を削除しました。');
+      return;
+    }
+    const saveMatrixIndex = event.target.dataset?.saveFareMatrix;
+    if (saveMatrixIndex === undefined) return;
+    const nextMatrix = getMatrixEditorState(toNumber(saveMatrixIndex));
     if (!nextMatrix) return;
     saveMatrixEditorState(nextMatrix);
     renderCarriers(search?.value || '');

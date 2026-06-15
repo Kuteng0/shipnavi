@@ -896,6 +896,11 @@ td {
   background: #f8fbff;
 }
 
+.matrix-editor-title {
+  align-self: center;
+  font-size: 1rem;
+}
+
 .matrix-editor-actions {
   align-items: end;
 }
@@ -933,6 +938,15 @@ td {
 
 .matrix-table th {
   padding: 8px;
+}
+
+.matrix-prefectures {
+  vertical-align: top;
+  white-space: normal;
+  word-break: keep-all;
+  line-height: 1.45;
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 .matrix-cell-input {
