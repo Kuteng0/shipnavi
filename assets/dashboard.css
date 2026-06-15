@@ -221,15 +221,15 @@ h2 {
 }
 
 .app-main {
-  width: min(1180px, calc(100% - 32px));
+  width: min(1360px, calc(100% - 20px));
   margin: 0 auto;
-  padding: 28px 0 56px;
+  padding: 20px 0 44px;
 }
 
 .app-topbar {
   display: grid;
-  gap: 16px;
-  margin-bottom: 22px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
 .app-topbar h1 {
@@ -257,7 +257,7 @@ h2 {
 .result-grid,
 .settings-grid {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .stat-grid {
@@ -280,11 +280,11 @@ h2 {
 .form-card,
 .upload-card,
 .empty-card {
-  padding: 20px;
+  padding: 16px;
 }
 
 .stat-card {
-  padding: 18px;
+  padding: 14px;
 }
 
 .stat-card p,
@@ -307,7 +307,7 @@ h2 {
 
 .action-card {
   display: block;
-  padding: 18px;
+  padding: 14px;
   background: linear-gradient(180deg, #ffffff, #f6fbff);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -330,8 +330,8 @@ h2 {
 
 .table-toolbar {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -344,7 +344,7 @@ h2 {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 11px 14px;
+  padding: 9px 12px;
   background: #fbfdff;
   outline: none;
 }
@@ -362,7 +362,7 @@ table {
 
 th,
 td {
-  padding: 14px 16px;
+  padding: 9px 11px;
   text-align: left;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
@@ -547,8 +547,8 @@ tr:last-child td {
   }
 
   .app-main {
-    width: min(1220px, calc(100% - 36px));
-    padding: 32px 0 64px;
+    width: min(1440px, calc(100% - 28px));
+    padding: 22px 0 52px;
   }
 
   .app-topbar {
@@ -717,7 +717,7 @@ td {
 
 .results-table table,
 .queue-table table {
-  min-width: 980px;
+  min-width: 940px;
   table-layout: fixed;
 }
 
@@ -733,11 +733,11 @@ td {
 }
 
 .address-cell {
-  min-width: 14rem;
+  min-width: 12rem;
 }
 
 .sku-cell {
-  min-width: 12rem;
+  min-width: 10rem;
 }
 
 .money-cell {
@@ -752,8 +752,8 @@ td {
 
 .summary-panel {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 7px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfdff;
@@ -769,14 +769,14 @@ td {
   min-width: 9rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: var(--white);
   color: var(--text);
   font-weight: 800;
 }
 
 .queue-actions {
-  min-width: 15rem;
+  min-width: 13rem;
 }
 
 .shipment-status-imported {
@@ -831,7 +831,7 @@ td {
 
 /* Phase9 density and matrix workflow */
 .app-topbar {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .app-topbar h1 {
@@ -839,8 +839,8 @@ td {
 }
 
 .button {
-  min-height: 44px;
-  padding: 0 18px;
+  min-height: 38px;
+  padding: 0 14px;
 }
 
 .dashboard-grid,
@@ -857,11 +857,11 @@ td {
 .form-card,
 .upload-card,
 .empty-card {
-  padding: 14px;
+  padding: 12px;
 }
 
 .stat-card {
-  padding: 12px;
+  padding: 10px;
 }
 
 .stat-card strong {
@@ -869,16 +869,17 @@ td {
 }
 
 .table-toolbar {
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 th,
 td {
-  padding: 8px 10px;
+  padding: 6px 8px;
+  line-height: 1.34;
 }
 
 .sidebar-menu a {
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .matrix-editor {
@@ -983,26 +984,28 @@ td {
 }
 
 .compact-results-table table {
-  min-width: 900px;
+  min-width: 860px;
   table-layout: fixed;
 }
 
 .compact-results-table th:nth-child(1) {
-  width: 8rem;
+  width: 7rem;
 }
 
 .compact-results-table th:nth-child(2),
 .compact-results-table th:nth-child(5) {
-  width: 14rem;
+  width: 12rem;
 }
 
 .compact-results-table th:nth-child(6) {
-  width: 10rem;
+  width: 9rem;
   text-align: right;
 }
 
 .compact-results-table td {
   vertical-align: top;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .id-cell,
@@ -1030,8 +1033,8 @@ td {
 .sku-cell span,
 .money-cell span {
   color: var(--muted);
-  font-size: 0.82rem;
-  line-height: 1.35;
+  font-size: 0.8rem;
+  line-height: 1.28;
 }
 
 .compact-results-table .address-cell,
@@ -1042,10 +1045,28 @@ td {
   white-space: normal;
 }
 
+.results-table .address-cell,
+.results-table .sku-cell,
+.queue-table .address-cell,
+.queue-table .sku-cell {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
 .compact-results-table .money-cell,
 .compact-results-table .money-cell strong,
 .compact-results-table .money-cell span {
   white-space: nowrap;
+}
+
+.results-table .money-cell,
+.queue-table .money-cell,
+.results-table td:nth-child(6),
+.queue-table td:nth-child(14) {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .back-to-top {

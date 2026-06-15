@@ -416,6 +416,9 @@ async function validateFareFixtures() {
     assertTruthy(`fare-matrix-normal.${normalCase.label} never treats numeric cells as prefectures`, !Object.values(matrixView.zoneGroups || {}).flat().some((value) => /^\d+$/.test(value)), { field: 'matrixView.zoneGroups', actual: matrixView.zoneGroups });
     const kanto80 = normalized.find((fare) => fare.zone === '関東' && fare.size === '80' && fare.weight === '5');
     assertEqual(`fare-matrix-normal.${normalCase.label} 関東 80 / 5kg fare`, kanto80?.fare, '480', { field: 'normalizedFareRows', expected: '480', actual: kanto80 });
+    ['carrier', 'service', 'size', 'weight', 'zone', 'prefectures', 'fare'].forEach((field) => {
+      assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows include ${field}`, Object.prototype.hasOwnProperty.call(kanto80 || {}, field), { field, actual: kanto80 });
+    });
     assertEqual(`fare-matrix-normal.${normalCase.label} normalized rows cover every matrix zone tier`, normalized.length, matrixView.rows.length * matrixView.zoneHeaders.length, { field: 'normalizedFareRows.length' });
     const reconstructed = callFunction('normalizeMatrixView', [matrixView]);
     assertEqual(`fare-matrix-normal.${normalCase.label} reconstructs original zone headers`, JSON.stringify(reconstructed.zoneHeaders), JSON.stringify(matrixView.zoneHeaders), { field: 'matrixView.zoneHeaders' });
@@ -423,6 +426,7 @@ async function validateFareFixtures() {
     resetImportIssues();
     const successIssues = callFunction('recordFareImportIssues', [normalCase.rows, format, matrixView, normalized, path.basename(normalCase.file)]);
     assertEqual(`fare-matrix-normal.${normalCase.label} successful matrix import creates no unresolved warnings`, successIssues.length, 0, { field: 'importIssues' });
+    assertTruthy(`fare-matrix-normal.${normalCase.label} successful matrix warningCount is not 100`, successIssues.length !== 100, { field: 'warningCount', actual: successIssues.length });
     setData('shipnaviDashboardFareTables', { matrixView, normalizedFareRows: normalized });
     const options = callFunction('getFareOptions', [60, '東京', 1000]);
     assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows are usable by getFareOptions`, options.length > 0, { fixture: path.relative(repoRoot, normalCase.file), field: 'getFareOptions', expected: 'options.length > 0', actual: options.length });
