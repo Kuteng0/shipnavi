@@ -1591,6 +1591,49 @@ function recordFareImportIssues(rows, fareFormat, matrixView, normalizedRows, so
   const knownMatrixHeaders = ['size', 'サイズ', 'サイズ(cm)', 'サイズ(mm)', '総長', '重量', '重量kg', '重量(kg)', 'weight', 'weightlimit'];
   const knownVerticalHeaders = ['carrier', '配送会社', 'service', 'サービス', 'size', 'サイズ', 'zone', '地域', '配送地域', 'fare', '運賃', '送料', 'weightlimit', '重量', '重量kg'];
   const hasZoneColumn = normalizedHeaders.some((header) => ['zone', '地域', '配送地域', '地区'].includes(header) || zoneSignals.includes(header)) || Boolean(matrixView?.zoneHeaders?.length);
+  if (fareFormat === 'matrix' && matrixView?.rows?.length && normalizedRows?.length) {
+    const knownMatrixZones = ['北海道', '北東北', '南東北', '関東', '東京', '東京都', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
+    matrixView.zoneHeaders
+      .filter((zone) => normalize(zone) && !knownMatrixZones.includes(normalize(zone)))
+      .forEach((zone) => {
+        issues.push(appendImportIssue({
+          type: 'column_name_mismatch',
+          sourceFlow: 'fare_import',
+          sourceFileName,
+          field: zone,
+          detectedColumn: zone,
+          message: '列名を確認してください。運賃表の項目として自動判定できませんでした。',
+        }));
+      });
+    matrixView.rows.forEach((row, index) => {
+      const rowNumber = index + 1;
+      if (!normalize(row.size)) {
+        issues.push(appendImportIssue({ type: 'missing_size', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'size', message: 'サイズが見つかりません。' }));
+      }
+      if (/mm|㎜|ミリ/i.test(`${matrixView.sizeLabel} ${row.size}`)) {
+        issues.push(appendImportIssue({ type: 'unit_mismatch', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'size', message: 'サイズ単位を確認してください。cm単位のサイズとして取り込んでください。' }));
+      }
+      if (normalize(row.weight) && !/^[0-9.,]+$/.test(normalize(row.weight))) {
+        issues.push(appendImportIssue({ type: 'invalid_weight_limit', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'weightLimit', message: '重量上限の形式を確認してください。' }));
+        issues.push(appendImportIssue({ type: 'unit_mismatch', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: 'weightLimit', message: '重量単位を確認してください。' }));
+      }
+      matrixView.zoneHeaders.forEach((zone) => {
+        if (!normalize(row.fares?.[zone]) || toNumber(row.fares?.[zone]) <= 0) {
+          issues.push(appendImportIssue({ type: 'missing_fare', sourceFlow: 'fare_import', sourceFileName, rowNumber, field: zone || 'fare', message: '運賃が見つかりません。' }));
+        }
+      });
+    });
+    if (!Array.isArray(rows?.[0])) {
+      const sizeHeader = headers[0] || 'size';
+      (rows || []).forEach((row, index) => {
+        const hasInputValue = Object.values(row || {}).some((value) => normalize(value));
+        if (hasInputValue && !normalizeSize(row[sizeHeader] ?? row.size)) {
+          issues.push(appendImportIssue({ type: 'missing_size', sourceFlow: 'fare_import', sourceFileName, rowNumber: index + 2, field: 'size', message: 'サイズが見つかりません。' }));
+        }
+      });
+    }
+    return issues;
+  }
   if (!hasZoneColumn) {
     issues.push(appendImportIssue({
       type: 'missing_zone_column',
@@ -1725,6 +1768,20 @@ function isMatrixPrefectureLabel(value) {
   return ['都道府県', '県', '府県', '地域'].includes(header);
 }
 
+const japanesePrefectures = [
+  '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
+  '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県', '山梨県',
+  '新潟県', '長野県', '富山県', '石川県', '福井県', '岐阜県', '静岡県', '愛知県', '三重県',
+  '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県',
+  '鳥取県', '島根県', '岡山県', '広島県', '山口県',
+  '徳島県', '香川県', '愛媛県', '高知県',
+  '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+];
+
+function isJapanesePrefecture(value) {
+  return japanesePrefectures.includes(compactText(value));
+}
+
 function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackService = '宅急便') {
   const rowArrays = rowArraysFromRows(rows).map((row) => row.map(compactText));
   const zoneRowIndex = rowArrays.findIndex((row) => row.some((cell) => normalizeHeader(cell) === '着地'));
@@ -1748,7 +1805,7 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
       .slice(zoneRowIndex + 1, headerRowIndex)
       .map((row) => row[index])
       .map(compactText)
-      .filter((value) => value && !isMatrixPrefectureLabel(value)),
+      .filter((value) => value && !isMatrixPrefectureLabel(value) && isJapanesePrefecture(value)),
   ]));
   return normalizeMatrixView({
     carrier,

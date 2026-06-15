@@ -406,16 +406,23 @@ async function validateFareFixtures() {
     assertEqual(`fare-matrix-normal.${normalCase.label} infers Yamato service default`, `${matrixView.carrier}/${matrixView.service}`, 'ヤマト/宅急便', { field: 'carrier/service' });
     assertIncludes(`fare-matrix-normal.${normalCase.label} keeps 北海道 zone header`, matrixView.zoneHeaders, '北海道', { field: 'matrixView.zoneHeaders' });
     assertTruthy(`fare-matrix-normal.${normalCase.label} does not create bogus S zone`, !matrixView.zoneHeaders.includes('S'), { field: 'matrixView.zoneHeaders', actual: matrixView.zoneHeaders });
+    assertEqual(`fare-matrix-normal.${normalCase.label} preserves required zone order`, JSON.stringify(matrixView.zoneHeaders), JSON.stringify(['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄']), { field: 'matrixView.zoneHeaders' });
+    assertEqual(`fare-matrix-normal.${normalCase.label} preserves 東京 prefecture group`, JSON.stringify(matrixView.zoneGroups?.東京), JSON.stringify(['東京都']), { field: 'matrixView.zoneGroups.東京' });
     const kantoPrefectures = matrixView.zoneGroups?.関東 || [];
     ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '神奈川県', '山梨県'].forEach((prefecture) => {
       assertIncludes(`fare-matrix-normal.${normalCase.label} preserves 関東 prefecture ${prefecture}`, kantoPrefectures, prefecture, { field: 'matrixView.zoneGroups.関東' });
     });
+    assertEqual(`fare-matrix-normal.${normalCase.label} preserves 九州 prefecture group`, JSON.stringify(matrixView.zoneGroups?.九州), JSON.stringify(['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県']), { field: 'matrixView.zoneGroups.九州' });
+    assertTruthy(`fare-matrix-normal.${normalCase.label} never treats numeric cells as prefectures`, !Object.values(matrixView.zoneGroups || {}).flat().some((value) => /^\d+$/.test(value)), { field: 'matrixView.zoneGroups', actual: matrixView.zoneGroups });
     const kanto80 = normalized.find((fare) => fare.zone === '関東' && fare.size === '80' && fare.weight === '5');
     assertEqual(`fare-matrix-normal.${normalCase.label} 関東 80 / 5kg fare`, kanto80?.fare, '480', { field: 'normalizedFareRows', expected: '480', actual: kanto80 });
     assertEqual(`fare-matrix-normal.${normalCase.label} normalized rows cover every matrix zone tier`, normalized.length, matrixView.rows.length * matrixView.zoneHeaders.length, { field: 'normalizedFareRows.length' });
     const reconstructed = callFunction('normalizeMatrixView', [matrixView]);
     assertEqual(`fare-matrix-normal.${normalCase.label} reconstructs original zone headers`, JSON.stringify(reconstructed.zoneHeaders), JSON.stringify(matrixView.zoneHeaders), { field: 'matrixView.zoneHeaders' });
     assertEqual(`fare-matrix-normal.${normalCase.label} reconstructs prefecture layout`, JSON.stringify(reconstructed.zoneGroups?.関東), JSON.stringify(kantoPrefectures), { field: 'matrixView.zoneGroups.関東' });
+    resetImportIssues();
+    const successIssues = callFunction('recordFareImportIssues', [normalCase.rows, format, matrixView, normalized, path.basename(normalCase.file)]);
+    assertEqual(`fare-matrix-normal.${normalCase.label} successful matrix import creates no unresolved warnings`, successIssues.length, 0, { field: 'importIssues' });
     setData('shipnaviDashboardFareTables', { matrixView, normalizedFareRows: normalized });
     const options = callFunction('getFareOptions', [60, '東京', 1000]);
     assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows are usable by getFareOptions`, options.length > 0, { fixture: path.relative(repoRoot, normalCase.file), field: 'getFareOptions', expected: 'options.length > 0', actual: options.length });
