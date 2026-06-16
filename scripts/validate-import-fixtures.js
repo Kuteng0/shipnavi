@@ -404,6 +404,7 @@ async function validateFareFixtures() {
     const matrixView = callFunction('createMatrixView', [normalCase.rows, 'ヤマト', '宅急便']);
     assertTruthy(`fare-matrix-normal.${normalCase.label} creates matrixView and normalizedFareRows`, matrixView && matrixView.rows && normalized.length > 0, { fixture: path.relative(repoRoot, normalCase.file), expected: 'matrixView + normalizedFareRows', actual: { matrixRows: matrixView?.rows?.length || 0, normalizedRows: normalized.length } });
     assertEqual(`fare-matrix-normal.${normalCase.label} infers Yamato service default`, `${matrixView.carrier}/${matrixView.service}`, 'ヤマト/宅急便', { field: 'carrier/service' });
+    assertEqual(`fare-matrix-normal.${normalCase.label} zoneCount is 13`, matrixView.zoneHeaders.length, 13, { field: 'matrixView.zoneHeaders.length', actual: matrixView.zoneHeaders });
     assertIncludes(`fare-matrix-normal.${normalCase.label} keeps 北海道 zone header`, matrixView.zoneHeaders, '北海道', { field: 'matrixView.zoneHeaders' });
     assertTruthy(`fare-matrix-normal.${normalCase.label} does not create bogus S zone`, !matrixView.zoneHeaders.includes('S'), { field: 'matrixView.zoneHeaders', actual: matrixView.zoneHeaders });
     assertEqual(`fare-matrix-normal.${normalCase.label} preserves required zone order`, JSON.stringify(matrixView.zoneHeaders), JSON.stringify(['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄']), { field: 'matrixView.zoneHeaders' });
@@ -414,8 +415,15 @@ async function validateFareFixtures() {
     });
     assertEqual(`fare-matrix-normal.${normalCase.label} preserves 九州 prefecture group`, JSON.stringify(matrixView.zoneGroups?.九州), JSON.stringify(['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県']), { field: 'matrixView.zoneGroups.九州' });
     assertTruthy(`fare-matrix-normal.${normalCase.label} never treats numeric cells as prefectures`, !Object.values(matrixView.zoneGroups || {}).flat().some((value) => /^\d+$/.test(value)), { field: 'matrixView.zoneGroups', actual: matrixView.zoneGroups });
+    const hokkaido60 = normalized.find((fare) => fare.zone === '北海道' && fare.size === '60' && fare.weight === '2');
+    assertEqual(`fare-matrix-normal.${normalCase.label} 北海道 60 / 2kg fare`, hokkaido60?.fare, '700', { field: 'normalizedFareRows', expected: '700', actual: hokkaido60 });
     const kanto80 = normalized.find((fare) => fare.zone === '関東' && fare.size === '80' && fare.weight === '5');
     assertEqual(`fare-matrix-normal.${normalCase.label} 関東 80 / 5kg fare`, kanto80?.fare, '480', { field: 'normalizedFareRows', expected: '480', actual: kanto80 });
+    const okinawa160 = normalized.find((fare) => fare.zone === '沖縄' && fare.size === '160' && fare.weight === '25');
+    assertEqual(`fare-matrix-normal.${normalCase.label} 沖縄 160 / 25kg fare`, okinawa160?.fare, '3780', { field: 'normalizedFareRows', expected: '3780', actual: okinawa160 });
+    [hokkaido60, kanto80, okinawa160].forEach((fare) => {
+      assertEqual(`fare-matrix-normal.${normalCase.label} matrixView matches normalizedFareRows for ${fare?.size}/${fare?.zone}`, matrixView.rows.find((row) => row.size === fare?.size)?.fares?.[fare?.zone], fare?.fare, { field: `${fare?.size}/${fare?.zone}` });
+    });
     ['carrier', 'service', 'size', 'weight', 'zone', 'prefectures', 'fare'].forEach((field) => {
       assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows include ${field}`, Object.prototype.hasOwnProperty.call(kanto80 || {}, field), { field, actual: kanto80 });
     });
