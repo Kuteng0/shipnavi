@@ -518,7 +518,9 @@ function columnName(index) {
 
 function worksheetXml(rows) {
   const sheetData = rows.map((row, rowIndex) => `
-    <row r="${rowIndex + 1}">${row.map((value, cellIndex) => `<c r="${columnName(cellIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`).join('')}</row>`).join('');
+    <row r="${rowIndex + 1}">${row.map((value, cellIndex) => (
+      normalize(value) ? `<c r="${columnName(cellIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>` : ''
+    )).join('')}</row>`).join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`;
 }
 
@@ -806,11 +808,13 @@ function parseWorksheetRows(xml = '', sharedStrings = []) {
   return [...String(xml).matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g)]
     .map(([rowXml]) => {
       const row = [];
+      let maxColIndex = -1;
       [...rowXml.matchAll(/<c\b[^>]*>[\s\S]*?<\/c>/g)].forEach(([cellXml]) => {
         const openTag = cellXml.match(/<c\b[^>]*>/)?.[0] || '';
         const cellType = getXmlAttribute(openTag, 't');
         const ref = getXmlAttribute(openTag, 'r');
         const colIndex = Math.max(0, columnIndexFromCellRef(ref));
+        maxColIndex = Math.max(maxColIndex, colIndex);
         let value = '';
         if (cellType === 's') {
           const sharedIndex = toNumber(cellXml.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1]);
@@ -822,7 +826,7 @@ function parseWorksheetRows(xml = '', sharedStrings = []) {
         }
         row[colIndex] = normalize(value);
       });
-      return trimEmptyTrailingCells(row);
+      return trimEmptyTrailingCells(Array.from({ length: maxColIndex + 1 }, (_, index) => row[index] || ''));
     })
     .filter((row) => row.some((value) => normalize(value)));
 }
@@ -878,11 +882,11 @@ function normalizeMatrixView(view) {
   const rawPrefectureRows = Array.isArray(view.prefectureRows) ? view.prefectureRows : [];
   const prefectureRows = rawPrefectureRows.length
     ? rawPrefectureRows.map((row) => ({
-      label: compactText(row?.label || '都道府県'),
+      label: compactText(row?.label || ''),
       cells: Object.fromEntries(zoneHeaders.map((zone) => [zone, compactText(row?.cells?.[zone] ?? row?.[zone] ?? '')])),
     })).filter((row) => row.label || Object.values(row.cells).some(Boolean))
     : Array.from({ length: Math.max(0, ...Object.values(zoneGroups).map((prefectures) => prefectures.length)) }, (_, rowIndex) => ({
-      label: '都道府県',
+      label: rowIndex === 0 ? '都道府県' : '',
       cells: Object.fromEntries(zoneHeaders.map((zone) => [zone, zoneGroups[zone]?.[rowIndex] || ''])),
     }));
   const carrier = normalizeCarrier(view.carrier || 'ヤマト');
@@ -1784,8 +1788,19 @@ function isJapanesePrefecture(value) {
   return japanesePrefectures.includes(compactText(value));
 }
 
+const japaneseMatrixZones = ['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
+
+function isValidMatrixZoneHeader(value) {
+  const text = compactText(value);
+  if (!text) return false;
+  if (/^[0-9.,]+$/.test(text)) return false;
+  if (isMatrixSizeHeader(text) || isMatrixWeightHeader(text) || isMatrixPrefectureLabel(text)) return false;
+  if (isJapanesePrefecture(text) && text !== '北海道') return false;
+  return japaneseMatrixZones.includes(text) || /地方|地域|エリア|Zone|ZONE/.test(text);
+}
+
 function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackService = '宅急便') {
-  const rowArrays = rowArraysFromRows(rows).map((row) => row.map(compactText));
+  const rowArrays = rowArraysFromRows(rows).map((row) => Array.from({ length: row.length }, (_, index) => compactText(row[index])));
   const zoneRowIndex = rowArrays.findIndex((row) => row.some((cell) => normalizeHeader(cell) === '着地'));
   if (zoneRowIndex < 0) return null;
   const headerRowIndex = rowArrays.findIndex((row, index) => index > zoneRowIndex && row.some(isMatrixSizeHeader) && row.some(isMatrixWeightHeader));
@@ -1795,11 +1810,11 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
   const weightIndex = headerRow.findIndex(isMatrixWeightHeader);
   const dataStartIndex = Math.max(sizeIndex, weightIndex) + 1;
   const zoneLabelIndex = rowArrays[zoneRowIndex].findIndex((cell) => normalizeHeader(cell) === '着地');
-  const zoneStartIndex = rowArrays[zoneRowIndex].findIndex((zone, index) => index > zoneLabelIndex && normalize(zone));
+  const zoneStartIndex = rowArrays[zoneRowIndex].findIndex((zone, index) => index > zoneLabelIndex && isValidMatrixZoneHeader(zone));
   if (zoneStartIndex < 0) return null;
   const zoneEntries = rowArrays[zoneRowIndex]
     .map((zone, index) => ({ zone, index, fareIndex: dataStartIndex + index - zoneStartIndex }))
-    .filter(({ zone, index }) => index >= zoneStartIndex && normalize(zone));
+    .filter(({ zone, index }) => index >= zoneStartIndex && isValidMatrixZoneHeader(zone));
   if (!zoneEntries.length) return null;
   const title = rowArrays.slice(0, zoneRowIndex).flat().filter(Boolean).join(' ');
   const { carrier, service } = inferMatrixCarrierService(title, fallbackCarrier, fallbackService);
@@ -1814,7 +1829,7 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
   ]));
   const prefectureRows = rowArrays.slice(zoneRowIndex + 1, headerRowIndex)
     .map((row) => ({
-      label: row.slice(0, zoneStartIndex).find(isMatrixPrefectureLabel) || '都道府県',
+      label: row.slice(0, zoneStartIndex).find(isMatrixPrefectureLabel) || '',
       cells: Object.fromEntries(zoneEntries.map(({ zone, index }) => {
         const value = compactText(row[index]);
         return [zone, isJapanesePrefecture(value) ? value : ''];
@@ -2360,7 +2375,7 @@ function renderCarriers(filter = '') {
       const zoneHeaderCells = matrix.zoneHeaders.map((zone) => `<th>${escapeHtml(zone)}</th>`).join('');
       const prefectureRows = (matrix.prefectureRows?.length ? matrix.prefectureRows : []).map((prefectureRow) => `
         <tr>
-          <th>${escapeHtml(prefectureRow.label || '都道府県')}</th>
+          <th>${escapeHtml(prefectureRow.label || '')}</th>
           <th></th>
           ${matrix.zoneHeaders.map((zone) => `<th class="matrix-prefectures">${escapeHtml(prefectureRow.cells?.[zone] || '')}</th>`).join('')}
         </tr>

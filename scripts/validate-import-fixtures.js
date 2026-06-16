@@ -490,11 +490,15 @@ async function validateFareFixtures() {
   assertEqual('CSV and XLSX equivalent matrix display rows match', JSON.stringify(matrixDisplayComparable(xlsxStyleXlsxView)), JSON.stringify(matrixDisplayComparable(xlsxStyleCsvView)), { field: 'matrixView.displayData' });
   assertEqual('CSV and XLSX equivalent normalizedFareRows count match', xlsxStyleXlsxRows.length, xlsxStyleCsvRows.length, { field: 'normalizedFareRows.length' });
   assertEqual('CSV and XLSX equivalent normalizedFareRows values match', JSON.stringify(fareComparableRows(xlsxStyleXlsxRows)), JSON.stringify(fareComparableRows(xlsxStyleCsvRows)), { field: 'normalizedFareRows' });
+  assertEqual('XLSX-style matrix zoneCount is 13', xlsxStyleXlsxView.zoneHeaders.length, 13, { field: 'matrixView.zoneHeaders', actual: xlsxStyleXlsxView.zoneHeaders });
   assertIncludes('XLSX-style matrix keeps 北海道 zone header', xlsxStyleXlsxView.zoneHeaders, '北海道', { field: 'matrixView.zoneHeaders' });
   assertTruthy('XLSX-style matrix has no extra 2 zone column', !xlsxStyleXlsxView.zoneHeaders.includes('2'), { field: 'matrixView.zoneHeaders', actual: xlsxStyleXlsxView.zoneHeaders });
+  assertEqual('XLSX-style matrix preserves exact zone order', JSON.stringify(xlsxStyleXlsxView.zoneHeaders), JSON.stringify(['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄']), { field: 'matrixView.zoneHeaders' });
   assertEqual('XLSX-style matrix first display row keeps 北海道 prefecture cell', xlsxStyleXlsxView.prefectureRows?.[0]?.cells?.北海道, '北海道', { field: 'matrixView.prefectureRows' });
+  assertEqual('XLSX-style matrix preserves blank prefecture row label', xlsxStyleXlsxView.prefectureRows?.[1]?.label, '', { field: 'matrixView.prefectureRows' });
   assertEqual('XLSX-style matrix keeps blank second visual column via display rows', xlsxStyleXlsxView.prefectureRows?.[1]?.cells?.北海道, '', { field: 'matrixView.prefectureRows' });
   assertEqual('XLSX-style matrix 60 北海道 fare', xlsxStyleXlsxRows.find((fare) => fare.zone === '北海道' && fare.size === '60')?.fare, '700', { field: 'normalizedFareRows' });
+  assertEqual('XLSX-style matrix 60 北東北 fare', xlsxStyleXlsxRows.find((fare) => fare.zone === '北東北' && fare.size === '60')?.fare, '500', { field: 'normalizedFareRows' });
   assertEqual('XLSX-style matrix 80 関東 fare', xlsxStyleXlsxRows.find((fare) => fare.zone === '関東' && fare.size === '80')?.fare, '480', { field: 'normalizedFareRows' });
   assertEqual('XLSX-style matrix 160 沖縄 fare', xlsxStyleXlsxRows.find((fare) => fare.zone === '沖縄' && fare.size === '160')?.fare, '3780', { field: 'normalizedFareRows' });
   resetImportIssues();
