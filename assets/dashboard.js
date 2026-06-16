@@ -1623,15 +1623,6 @@ function recordFareImportIssues(rows, fareFormat, matrixView, normalizedRows, so
         }
       });
     });
-    if (!Array.isArray(rows?.[0])) {
-      const sizeHeader = headers[0] || 'size';
-      (rows || []).forEach((row, index) => {
-        const hasInputValue = Object.values(row || {}).some((value) => normalize(value));
-        if (hasInputValue && !normalizeSize(row[sizeHeader] ?? row.size)) {
-          issues.push(appendImportIssue({ type: 'missing_size', sourceFlow: 'fare_import', sourceFileName, rowNumber: index + 2, field: 'size', message: 'サイズが見つかりません。' }));
-        }
-      });
-    }
     return issues;
   }
   if (!hasZoneColumn) {

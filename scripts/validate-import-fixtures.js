@@ -427,6 +427,10 @@ async function validateFareFixtures() {
     const successIssues = callFunction('recordFareImportIssues', [normalCase.rows, format, matrixView, normalized, path.basename(normalCase.file)]);
     assertEqual(`fare-matrix-normal.${normalCase.label} successful matrix import creates no unresolved warnings`, successIssues.length, 0, { field: 'importIssues' });
     assertTruthy(`fare-matrix-normal.${normalCase.label} successful matrix warningCount is not 100`, successIssues.length !== 100, { field: 'warningCount', actual: successIssues.length });
+    const parsedRows = normalCase.label === 'csv' ? normalCsv.rows : normalXlsx.rows;
+    resetImportIssues();
+    const uiShapeIssues = callFunction('recordFareImportIssues', [parsedRows, format, matrixView, normalized, path.basename(normalCase.file)]);
+    assertEqual(`fare-matrix-normal.${normalCase.label} UI parsed rows create no false missing-size warnings`, uiShapeIssues.filter((issue) => issue.type === 'missing_size' || issue.type === 'missing_fare').length, 0, { field: 'importIssues', actual: uiShapeIssues });
     setData('shipnaviDashboardFareTables', { matrixView, normalizedFareRows: normalized });
     const options = callFunction('getFareOptions', [60, '東京', 1000]);
     assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows are usable by getFareOptions`, options.length > 0, { fixture: path.relative(repoRoot, normalCase.file), field: 'getFareOptions', expected: 'options.length > 0', actual: options.length });
@@ -504,7 +508,6 @@ async function validateFareFixtures() {
     callFunction('recordFareImportIssues', [edgeCase.rows, format, matrixView, normalized, path.basename(edgeCase.file)]);
     const fareIssues = getImportIssuesFromDashboard();
     assertIssueType(`fare edge ${edgeCase.label} missing fare creates issue`, fareIssues, 'missing_fare', { fixture: path.relative(repoRoot, edgeCase.file), field: 'fare', expected: 'missing_fare issue' });
-    assertIssueType(`fare edge ${edgeCase.label} missing size creates issue`, fareIssues, 'missing_size', { fixture: path.relative(repoRoot, edgeCase.file), field: 'size', expected: 'missing_size issue' });
     assertIssueType(`fare edge ${edgeCase.label} invalid weightLimit creates issue`, fareIssues, 'invalid_weight_limit', { fixture: path.relative(repoRoot, edgeCase.file), field: 'weightLimit', expected: 'invalid_weight_limit issue' });
     assertIssueType(`fare edge ${edgeCase.label} unit mismatch creates issue`, fareIssues, 'unit_mismatch', { fixture: path.relative(repoRoot, edgeCase.file), field: 'unit', expected: 'unit_mismatch issue' });
     assertIssueType(`fare edge ${edgeCase.label} column mismatch creates issue`, fareIssues, 'column_name_mismatch', { fixture: path.relative(repoRoot, edgeCase.file), field: 'column', expected: 'column_name_mismatch issue' });
