@@ -419,9 +419,11 @@ async function validateFareFixtures() {
     assertEqual(`fare-matrix-normal.${normalCase.label} 北海道 60 / 2kg fare`, hokkaido60?.fare, '700', { field: 'normalizedFareRows', expected: '700', actual: hokkaido60 });
     const kanto80 = normalized.find((fare) => fare.zone === '関東' && fare.size === '80' && fare.weight === '5');
     assertEqual(`fare-matrix-normal.${normalCase.label} 関東 80 / 5kg fare`, kanto80?.fare, '480', { field: 'normalizedFareRows', expected: '480', actual: kanto80 });
+    const kyushu100 = normalized.find((fare) => fare.zone === '九州' && fare.size === '100' && fare.weight === '10');
+    assertEqual(`fare-matrix-normal.${normalCase.label} 九州 100 / 10kg fare`, kyushu100?.fare, '800', { field: 'normalizedFareRows', expected: '800', actual: kyushu100 });
     const okinawa160 = normalized.find((fare) => fare.zone === '沖縄' && fare.size === '160' && fare.weight === '25');
     assertEqual(`fare-matrix-normal.${normalCase.label} 沖縄 160 / 25kg fare`, okinawa160?.fare, '3780', { field: 'normalizedFareRows', expected: '3780', actual: okinawa160 });
-    [hokkaido60, kanto80, okinawa160].forEach((fare) => {
+    [hokkaido60, kanto80, kyushu100, okinawa160].forEach((fare) => {
       assertEqual(`fare-matrix-normal.${normalCase.label} matrixView matches normalizedFareRows for ${fare?.size}/${fare?.zone}`, matrixView.rows.find((row) => row.size === fare?.size)?.fares?.[fare?.zone], fare?.fare, { field: `${fare?.size}/${fare?.zone}` });
     });
     ['carrier', 'service', 'size', 'weight', 'zone', 'prefectures', 'fare'].forEach((field) => {
@@ -434,11 +436,14 @@ async function validateFareFixtures() {
     resetImportIssues();
     const successIssues = callFunction('recordFareImportIssues', [normalCase.rows, format, matrixView, normalized, path.basename(normalCase.file)]);
     assertEqual(`fare-matrix-normal.${normalCase.label} successful matrix import creates no unresolved warnings`, successIssues.length, 0, { field: 'importIssues' });
+    assertEqual(`fare-matrix-normal.${normalCase.label} successful matrix import leaves unresolvedIssues at 0`, getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
     assertTruthy(`fare-matrix-normal.${normalCase.label} successful matrix warningCount is not 100`, successIssues.length !== 100, { field: 'warningCount', actual: successIssues.length });
     const parsedRows = normalCase.label === 'csv' ? normalCsv.rows : normalXlsx.rows;
     resetImportIssues();
     const uiShapeIssues = callFunction('recordFareImportIssues', [parsedRows, format, matrixView, normalized, path.basename(normalCase.file)]);
-    assertEqual(`fare-matrix-normal.${normalCase.label} UI parsed rows create no false missing-size warnings`, uiShapeIssues.filter((issue) => issue.type === 'missing_size' || issue.type === 'missing_fare').length, 0, { field: 'importIssues', actual: uiShapeIssues });
+    const falseLegacyIssues = uiShapeIssues.filter((issue) => ['column_name_mismatch', 'missing_size', 'missing_fare'].includes(issue.type));
+    assertEqual(`fare-matrix-normal.${normalCase.label} UI parsed rows create no false legacy warnings`, falseLegacyIssues.length, 0, { field: 'importIssues', actual: uiShapeIssues });
+    assertEqual(`fare-matrix-normal.${normalCase.label} UI parsed rows leave unresolvedIssues at 0`, getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
     setData('shipnaviDashboardFareTables', { matrixView, normalizedFareRows: normalized });
     const options = callFunction('getFareOptions', [60, '東京', 1000]);
     assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows are usable by getFareOptions`, options.length > 0, { fixture: path.relative(repoRoot, normalCase.file), field: 'getFareOptions', expected: 'options.length > 0', actual: options.length });
@@ -462,13 +467,25 @@ async function validateFareFixtures() {
   assertTruthy('same carrier/service replacement keeps unrelated carrier fares', fareState.normalizedFareRows.some((fare) => fare.carrier === '佐川'), { field: 'carrier' });
   const sagawaMatrixView = callFunction('normalizeMatrixView', [{ ...realMatrixView, carrier: '佐川', carrierLabel: '佐川急便', service: '飛脚宅配便' }]);
   const sagawaMatrixRows = callFunction('normalizeFareMatrix', [sagawaMatrixView]);
+  const japanPostMatrixView = callFunction('normalizeMatrixView', [{ ...realMatrixView, carrier: '日本郵便', carrierLabel: '日本郵便', service: 'ゆうパック' }]);
+  const japanPostMatrixRows = callFunction('normalizeFareMatrix', [japanPostMatrixView]);
   setData('shipnaviDashboardFareTables', {
-    matrixView: callFunction('makeMatrixViewState', [[realMatrixView, sagawaMatrixView]]),
-    normalizedFareRows: [...realMatrixRows, ...sagawaMatrixRows],
+    matrixView: callFunction('makeMatrixViewState', [[realMatrixView, sagawaMatrixView, japanPostMatrixView]]),
+    normalizedFareRows: [...realMatrixRows, ...sagawaMatrixRows, ...japanPostMatrixRows],
   });
+  fareState = callFunction('getFareTableState', []);
+  assertTruthy('ヤマト/佐川/日本郵便 matrix tables coexist', ['ヤマト', '佐川', '日本郵便'].every((carrier) => fareState.normalizedFareRows.some((fare) => fare.carrier === carrier)), { field: 'normalizedFareRows', actual: [...new Set(fareState.normalizedFareRows.map((fare) => fare.carrier))] });
+  const replacementJapanPostRows = japanPostMatrixRows.map((fare) => (fare.carrier === '日本郵便' && fare.service === 'ゆうパック' && fare.size === '60' && fare.zone === '東京' ? { ...fare, fare: '888' } : fare));
+  callFunction('mergeImportedFareTable', [japanPostMatrixView, replacementJapanPostRows]);
+  fareState = callFunction('getFareTableState', []);
+  const japanPostTokyo60 = fareState.normalizedFareRows.filter((fare) => fare.carrier === '日本郵便' && fare.service === 'ゆうパック' && fare.size === '60' && fare.zone === '東京');
+  assertEqual('re-importing 日本郵便 replaces only that matrix scope', japanPostTokyo60.length, 1, { field: 'normalizedFareRows' });
+  assertEqual('re-imported 日本郵便 matrix updates its fare', japanPostTokyo60[0]?.fare, '888', { field: 'fare' });
+  assertTruthy('re-importing 日本郵便 keeps ヤマト and 佐川 matrices', ['ヤマト', '佐川'].every((carrier) => fareState.normalizedFareRows.some((fare) => fare.carrier === carrier)), { field: 'normalizedFareRows', actual: [...new Set(fareState.normalizedFareRows.map((fare) => fare.carrier))] });
   fareState = callFunction('deleteFareTableByScope', ['ヤマト', '宅急便']);
-  assertTruthy('deleting one carrier/service matrix removes only that carrier rows', !fareState.normalizedFareRows.some((fare) => fare.carrier === 'ヤマト') && fareState.normalizedFareRows.some((fare) => fare.carrier === '佐川'), { field: 'normalizedFareRows', actual: [...new Set(fareState.normalizedFareRows.map((fare) => fare.carrier))] });
+  assertTruthy('deleting one carrier/service matrix removes only that carrier rows', !fareState.normalizedFareRows.some((fare) => fare.carrier === 'ヤマト') && fareState.normalizedFareRows.some((fare) => fare.carrier === '佐川') && fareState.normalizedFareRows.some((fare) => fare.carrier === '日本郵便'), { field: 'normalizedFareRows', actual: [...new Set(fareState.normalizedFareRows.map((fare) => fare.carrier))] });
   assertTruthy('deleting one carrier/service matrix keeps other matrix table', (fareState.matrixView?.tables || []).some((table) => table.carrier === '佐川' && table.service === '飛脚宅配便'), { field: 'matrixView.tables' });
+  assertTruthy('deleting one carrier/service matrix keeps 日本郵便 matrix table', (fareState.matrixView?.tables || []).some((table) => table.carrier === '日本郵便' && table.service === 'ゆうパック'), { field: 'matrixView.tables' });
 
   const wholeEdgeRows = parseCsvFile(edgeFile);
   const edgeHeaders = Object.keys(wholeEdgeRows[0] || {});
