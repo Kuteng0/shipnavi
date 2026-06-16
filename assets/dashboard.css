@@ -941,6 +941,13 @@ td {
   padding: 8px;
 }
 
+.matrix-title-cell {
+  text-align: left;
+  font-size: 1rem;
+  color: var(--text);
+  background: #eef6ff;
+}
+
 .matrix-prefectures {
   vertical-align: top;
   white-space: normal;

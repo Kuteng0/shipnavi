@@ -875,6 +875,16 @@ function normalizeMatrixView(view) {
     groups[zone] = Array.isArray(rawPrefectures) ? rawPrefectures.map(compactText).filter(Boolean) : [];
     return groups;
   }, {});
+  const rawPrefectureRows = Array.isArray(view.prefectureRows) ? view.prefectureRows : [];
+  const prefectureRows = rawPrefectureRows.length
+    ? rawPrefectureRows.map((row) => ({
+      label: compactText(row?.label || '都道府県'),
+      cells: Object.fromEntries(zoneHeaders.map((zone) => [zone, compactText(row?.cells?.[zone] ?? row?.[zone] ?? '')])),
+    })).filter((row) => row.label || Object.values(row.cells).some(Boolean))
+    : Array.from({ length: Math.max(0, ...Object.values(zoneGroups).map((prefectures) => prefectures.length)) }, (_, rowIndex) => ({
+      label: '都道府県',
+      cells: Object.fromEntries(zoneHeaders.map((zone) => [zone, zoneGroups[zone]?.[rowIndex] || ''])),
+    }));
   const carrier = normalizeCarrier(view.carrier || 'ヤマト');
   return {
     carrier,
@@ -884,6 +894,7 @@ function normalizeMatrixView(view) {
     weightLabel: compactText(view.weightLabel || '重量') || '重量',
     zoneHeaders,
     zoneGroups,
+    prefectureRows,
     rows: Array.isArray(view.rows) ? view.rows.map((row) => ({
       size: normalizeSize(row?.size),
       weight: normalize(row?.weight),
@@ -1801,6 +1812,15 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
       .map(compactText)
       .filter((value) => value && !isMatrixPrefectureLabel(value) && isJapanesePrefecture(value)),
   ]));
+  const prefectureRows = rowArrays.slice(zoneRowIndex + 1, headerRowIndex)
+    .map((row) => ({
+      label: row.slice(0, zoneStartIndex).find(isMatrixPrefectureLabel) || '都道府県',
+      cells: Object.fromEntries(zoneEntries.map(({ zone, index }) => {
+        const value = compactText(row[index]);
+        return [zone, isJapanesePrefecture(value) ? value : ''];
+      })),
+    }))
+    .filter((row) => Object.values(row.cells).some(Boolean));
   return normalizeMatrixView({
     carrier,
     carrierLabel: matrixDisplayCarrier(carrier, rawCarrierLabel),
@@ -1809,6 +1829,7 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
     weightLabel: headerRow[weightIndex] || '重量',
     zoneHeaders: zoneEntries.map(({ zone }) => zone),
     zoneGroups,
+    prefectureRows,
     rows: rowArrays.slice(headerRowIndex + 1).map((row) => ({
       size: row[sizeIndex],
       weight: row[weightIndex],
@@ -2337,10 +2358,14 @@ function renderCarriers(filter = '') {
     }
     tbody.innerHTML = matchingTables.map(({ matrix, tableIndex }) => {
       const zoneHeaderCells = matrix.zoneHeaders.map((zone) => `<th>${escapeHtml(zone)}</th>`).join('');
-      const prefectureCells = matrix.zoneHeaders.map((zone) => {
-        const prefectures = matrix.zoneGroups?.[zone] || [];
-        return `<th class="matrix-prefectures">${prefectures.map(escapeHtml).join('<br>')}</th>`;
-      }).join('');
+      const prefectureRows = (matrix.prefectureRows?.length ? matrix.prefectureRows : []).map((prefectureRow) => `
+        <tr>
+          <th>${escapeHtml(prefectureRow.label || '都道府県')}</th>
+          <th></th>
+          ${matrix.zoneHeaders.map((zone) => `<th class="matrix-prefectures">${escapeHtml(prefectureRow.cells?.[zone] || '')}</th>`).join('')}
+        </tr>
+      `).join('');
+      const emptyZoneCells = matrix.zoneHeaders.map(() => '<th></th>').join('');
       const matrixRows = matrix.rows.map((row, rowIndex) => `
         <tr>
           <td><input class="matrix-cell-input" data-matrix-size="${tableIndex}-${rowIndex}" value="${escapeHtml(row.size)}" /></td>
@@ -2366,8 +2391,10 @@ function renderCarriers(filter = '') {
             <div class="responsive-table matrix-table-wrap">
             <table class="matrix-table">
               <thead>
-                <tr><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${zoneHeaderCells}</tr>
-                <tr><th></th><th></th>${prefectureCells}</tr>
+                <tr><th class="matrix-title-cell" colspan="${matrix.zoneHeaders.length + 2}">${escapeHtml(matrixDisplayCarrier(matrix.carrier, matrix.carrierLabel))}</th></tr>
+                <tr><th>着地</th><th></th>${zoneHeaderCells}</tr>
+                ${prefectureRows}
+                <tr><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${emptyZoneCells}</tr>
               </thead>
               <tbody>${matrixRows}</tbody>
             </table>

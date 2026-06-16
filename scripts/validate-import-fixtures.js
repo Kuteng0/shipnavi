@@ -381,10 +381,14 @@ async function validateProductFixtures() {
 async function validateFareFixtures() {
   const normalFile = fixturePath('fares', 'fare-matrix-normal.csv');
   const normalXlsxFile = fixturePath('fares', 'fare-matrix-normal.xlsx');
+  const xlsxStyleFile = fixturePath('fares', 'fare-matrix-xlsx-style.csv');
+  const xlsxStyleXlsxFile = fixturePath('fares', 'fare-matrix-xlsx-style.xlsx');
   const edgeFile = fixturePath('fares', 'fare-matrix-edge-cases.csv');
   const edgeXlsxFile = fixturePath('fares', 'fare-matrix-edge-cases.xlsx');
   ensureFile(normalFile);
   ensureFile(normalXlsxFile, 'XLSX fixture');
+  ensureFile(xlsxStyleFile);
+  ensureFile(xlsxStyleXlsxFile, 'XLSX fixture');
   ensureFile(edgeFile);
   ensureFile(edgeXlsxFile, 'XLSX fixture');
 
@@ -448,6 +452,55 @@ async function validateFareFixtures() {
     const options = callFunction('getFareOptions', [60, '東京', 1000]);
     assertTruthy(`fare-matrix-normal.${normalCase.label} normalizedFareRows are usable by getFareOptions`, options.length > 0, { fixture: path.relative(repoRoot, normalCase.file), field: 'getFareOptions', expected: 'options.length > 0', actual: options.length });
   }
+
+  const fareComparableRows = (rows) => rows.map((fare) => ({
+    carrier: fare.carrier,
+    service: fare.service,
+    size: fare.size,
+    weight: fare.weight,
+    weightLimit: fare.weightLimit,
+    zone: fare.zone,
+    prefectures: fare.prefectures,
+    fare: fare.fare,
+  })).sort((a, b) => `${a.carrier}|${a.service}|${a.size}|${a.weight}|${a.zone}`.localeCompare(`${b.carrier}|${b.service}|${b.size}|${b.weight}|${b.zone}`, 'ja'));
+  const matrixDisplayComparable = (view) => ({
+    carrier: view.carrier,
+    service: view.service,
+    sizeLabel: view.sizeLabel,
+    weightLabel: view.weightLabel,
+    zoneHeaders: view.zoneHeaders,
+    zoneGroups: view.zoneGroups,
+    prefectureRows: view.prefectureRows,
+    rows: view.rows,
+  });
+  const xlsxStyleCsv = await readImportFixtureFile(xlsxStyleFile);
+  const xlsxStyleXlsx = await readImportFixtureFile(xlsxStyleXlsxFile);
+  const xlsxStyleCsvHeaders = Array.isArray(xlsxStyleCsv.rawRows[0]) ? xlsxStyleCsv.rawRows[0] : Object.keys(xlsxStyleCsv.rawRows[0] || {});
+  const xlsxStyleXlsxHeaders = Array.isArray(xlsxStyleXlsx.rawRows[0]) ? xlsxStyleXlsx.rawRows[0] : Object.keys(xlsxStyleXlsx.rawRows[0] || {});
+  const xlsxStyleCsvFormat = callFunction('detectFareTableFormat', [xlsxStyleCsvHeaders, xlsxStyleCsv.rawRows]);
+  const xlsxStyleXlsxFormat = callFunction('detectFareTableFormat', [xlsxStyleXlsxHeaders, xlsxStyleXlsx.rawRows]);
+  const xlsxStyleCsvView = callFunction('createMatrixView', [xlsxStyleCsv.rawRows, 'ヤマト', '宅急便']);
+  const xlsxStyleXlsxView = callFunction('createMatrixView', [xlsxStyleXlsx.rawRows, 'ヤマト', '宅急便']);
+  const xlsxStyleCsvRows = callFunction('normalizeFareMatrix', [xlsxStyleCsv.rawRows, 'ヤマト', '宅急便']);
+  const xlsxStyleXlsxRows = callFunction('normalizeFareMatrix', [xlsxStyleXlsx.rawRows, 'ヤマト', '宅急便']);
+  assertEqual('fare-matrix-xlsx-style.csv is detected as matrix', xlsxStyleCsvFormat, 'matrix', { fixture: path.relative(repoRoot, xlsxStyleFile), field: 'headers' });
+  assertEqual('fare-matrix-xlsx-style.xlsx is detected as matrix', xlsxStyleXlsxFormat, 'matrix', { fixture: path.relative(repoRoot, xlsxStyleXlsxFile), field: 'headers' });
+  assertEqual('CSV and XLSX equivalent matrix zone order match', JSON.stringify(xlsxStyleXlsxView.zoneHeaders), JSON.stringify(xlsxStyleCsvView.zoneHeaders), { field: 'matrixView.zoneHeaders', actual: xlsxStyleXlsxView.zoneHeaders });
+  assertEqual('CSV and XLSX equivalent matrix prefecture groups match', JSON.stringify(xlsxStyleXlsxView.zoneGroups), JSON.stringify(xlsxStyleCsvView.zoneGroups), { field: 'matrixView.zoneGroups' });
+  assertEqual('CSV and XLSX equivalent matrix display rows match', JSON.stringify(matrixDisplayComparable(xlsxStyleXlsxView)), JSON.stringify(matrixDisplayComparable(xlsxStyleCsvView)), { field: 'matrixView.displayData' });
+  assertEqual('CSV and XLSX equivalent normalizedFareRows count match', xlsxStyleXlsxRows.length, xlsxStyleCsvRows.length, { field: 'normalizedFareRows.length' });
+  assertEqual('CSV and XLSX equivalent normalizedFareRows values match', JSON.stringify(fareComparableRows(xlsxStyleXlsxRows)), JSON.stringify(fareComparableRows(xlsxStyleCsvRows)), { field: 'normalizedFareRows' });
+  assertIncludes('XLSX-style matrix keeps 北海道 zone header', xlsxStyleXlsxView.zoneHeaders, '北海道', { field: 'matrixView.zoneHeaders' });
+  assertTruthy('XLSX-style matrix has no extra 2 zone column', !xlsxStyleXlsxView.zoneHeaders.includes('2'), { field: 'matrixView.zoneHeaders', actual: xlsxStyleXlsxView.zoneHeaders });
+  assertEqual('XLSX-style matrix first display row keeps 北海道 prefecture cell', xlsxStyleXlsxView.prefectureRows?.[0]?.cells?.北海道, '北海道', { field: 'matrixView.prefectureRows' });
+  assertEqual('XLSX-style matrix keeps blank second visual column via display rows', xlsxStyleXlsxView.prefectureRows?.[1]?.cells?.北海道, '', { field: 'matrixView.prefectureRows' });
+  assertEqual('XLSX-style matrix 60 北海道 fare', xlsxStyleXlsxRows.find((fare) => fare.zone === '北海道' && fare.size === '60')?.fare, '700', { field: 'normalizedFareRows' });
+  assertEqual('XLSX-style matrix 80 関東 fare', xlsxStyleXlsxRows.find((fare) => fare.zone === '関東' && fare.size === '80')?.fare, '480', { field: 'normalizedFareRows' });
+  assertEqual('XLSX-style matrix 160 沖縄 fare', xlsxStyleXlsxRows.find((fare) => fare.zone === '沖縄' && fare.size === '160')?.fare, '3780', { field: 'normalizedFareRows' });
+  resetImportIssues();
+  const xlsxStyleIssues = callFunction('recordFareImportIssues', [xlsxStyleXlsx.rawRows, xlsxStyleXlsxFormat, xlsxStyleXlsxView, xlsxStyleXlsxRows, path.basename(xlsxStyleXlsxFile)]);
+  assertEqual('XLSX-style successful matrix warningCount is 0', xlsxStyleIssues.length, 0, { field: 'warningCount', actual: xlsxStyleIssues });
+  assertEqual('XLSX-style successful matrix unresolvedIssues is 0', getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
 
   setData('shipnaviDashboardFareTables', { matrixView: null, normalizedFareRows: [
     { carrier: '佐川', service: '飛脚宅配便', size: '60', zone: '東京', fare: '990', weightLimit: '2000' },
