@@ -917,53 +917,94 @@ td {
 }
 
 .matrix-table-wrap {
+  overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
 .matrix-table {
-  min-width: 760px;
+  min-width: 1080px;
   table-layout: fixed;
-}
-
-.matrix-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .matrix-table th,
 .matrix-table td {
-  padding: 0;
+  height: 38px;
+  min-width: 72px;
+  padding: 6px 8px;
+  overflow: hidden;
+  text-align: center;
+  vertical-align: middle;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  background: var(--white);
 }
 
 .matrix-table th {
-  padding: 8px;
+  font-weight: 800;
 }
 
-.matrix-title-cell {
-  text-align: left;
-  font-size: 1rem;
-  color: var(--text);
-  background: #eef6ff;
+.matrix-zone-row th {
+  text-align: center;
+  font-weight: 900;
+  background: #f3f4f6;
+  border-bottom: 2px solid #b9c2cf;
+}
+
+.matrix-size-row th {
+  font-weight: 900;
+  background: #f8fafc;
+}
+
+.matrix-table th:nth-child(1),
+.matrix-table td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 112px;
+  min-width: 112px;
+  background: #f8fafc;
+}
+
+.matrix-table th:nth-child(2),
+.matrix-table td:nth-child(2) {
+  position: sticky;
+  left: 112px;
+  z-index: 3;
+  width: 92px;
+  min-width: 92px;
+  background: #f8fafc;
+}
+
+.matrix-zone-row th:nth-child(1),
+.matrix-zone-row th:nth-child(2),
+.matrix-size-row th:nth-child(1),
+.matrix-size-row th:nth-child(2) {
+  z-index: 5;
 }
 
 .matrix-prefectures {
   vertical-align: top;
   white-space: normal;
   word-break: keep-all;
-  line-height: 1.45;
-  font-size: 0.78rem;
-  color: var(--muted);
+  line-height: 1.35;
+  font-size: 0.82rem;
+  color: var(--text);
+  background: var(--white);
 }
 
 .matrix-cell-input {
   width: 100%;
-  min-height: 36px;
+  height: 100%;
+  min-height: 34px;
   border: 0;
   border-radius: 0;
-  padding: 7px 8px;
-  background: var(--white);
+  padding: 4px 6px;
+  text-align: center;
+  background: transparent;
   color: var(--text);
   outline: 1px solid transparent;
 }
@@ -977,7 +1018,7 @@ td {
 
 .money-input,
 .matrix-table td:not(:first-child):not(:nth-child(2)) input {
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 

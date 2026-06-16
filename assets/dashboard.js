@@ -2406,10 +2406,9 @@ function renderCarriers(filter = '') {
             <div class="responsive-table matrix-table-wrap">
             <table class="matrix-table">
               <thead>
-                <tr><th class="matrix-title-cell" colspan="${matrix.zoneHeaders.length + 2}">${escapeHtml(matrixDisplayCarrier(matrix.carrier, matrix.carrierLabel))}</th></tr>
-                <tr><th>着地</th><th></th>${zoneHeaderCells}</tr>
+                <tr class="matrix-zone-row"><th>着地</th><th></th>${zoneHeaderCells}</tr>
                 ${prefectureRows}
-                <tr><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${emptyZoneCells}</tr>
+                <tr class="matrix-size-row"><th>${escapeHtml(matrix.sizeLabel)}</th><th>${escapeHtml(matrix.weightLabel)}</th>${emptyZoneCells}</tr>
               </thead>
               <tbody>${matrixRows}</tbody>
             </table>
