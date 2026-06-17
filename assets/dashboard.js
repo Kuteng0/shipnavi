@@ -547,23 +547,96 @@ function templateRowsFor(type) {
     ['注文番号', '顧客名', '郵便番号', '配送先住所', 'SKU', '数量', 'プラットフォーム', '注意事項'],
     ['ORD-001', '匿名顧客A', '100-0001', '東京都千代田区匿名1-1-1', 'SKU-001', '1', 'ShipNavi標準', '個人情報は匿名化してからアップロードしてください。'],
   ];
+  const matrixRows = (title, zoneHeaders, zoneGroups, fareRows) => {
+    const maxPrefectureRows = Math.max(...zoneHeaders.map((zone) => zoneGroups[zone]?.length || 0));
+    const prefectureRows = Array.from({ length: maxPrefectureRows }, (_, index) => [
+      index === 0 ? '都道府県' : '',
+      '',
+      ...zoneHeaders.map((zone) => zoneGroups[zone]?.[index] || ''),
+    ]);
+    return [
+      [title],
+      ['着地', '', ...zoneHeaders],
+      ...prefectureRows,
+      ['3辺合計(cm)', '重量(kg)', ...zoneHeaders.map(() => '')],
+      ...fareRows,
+    ];
+  };
+  const yamatoZones = ['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
+  const yamatoGroups = {
+    北海道: ['北海道'],
+    北東北: ['青森県', '岩手県', '秋田県'],
+    南東北: ['宮城県', '山形県', '福島県'],
+    関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '神奈川県', '山梨県'],
+    東京: ['東京都'],
+    信越: ['新潟県', '長野県'],
+    北陸: ['富山県', '石川県', '福井県'],
+    中部: ['愛知県', '岐阜県', '静岡県', '三重県'],
+    関西: ['大阪府', '京都府', '兵庫県', '奈良県', '滋賀県', '和歌山県'],
+    中国: ['岡山県', '広島県', '山口県', '鳥取県', '島根県'],
+    四国: ['香川県', '徳島県', '愛媛県', '高知県'],
+    九州: ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'],
+    沖縄: ['沖縄県'],
+  };
+  const sagawaZones = ['北海道', '北東北', '南東北', '関東', '信越', '東海', '北陸', '関西', '中国', '四国', '北九州', '南九州', '沖縄'];
+  const sagawaGroups = {
+    北海道: ['北海道'],
+    北東北: ['青森県', '岩手県', '秋田県'],
+    南東北: ['宮城県', '山形県', '福島県'],
+    関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県', '山梨県'],
+    信越: ['新潟県', '長野県'],
+    東海: ['岐阜県', '静岡県', '愛知県', '三重県'],
+    北陸: ['富山県', '石川県', '福井県'],
+    関西: ['滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
+    中国: ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
+    四国: ['徳島県', '香川県', '愛媛県', '高知県'],
+    北九州: ['福岡県', '佐賀県', '長崎県', '大分県'],
+    南九州: ['熊本県', '宮崎県', '鹿児島県'],
+    沖縄: ['沖縄県'],
+  };
+  const postZones = ['北海道', '東北', '関東', '東京', '南関東', '信越', '北陸', '東海', '近畿', '中国', '四国', '九州', '沖縄'];
+  const postGroups = {
+    北海道: ['北海道'],
+    東北: ['青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
+    関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県'],
+    東京: ['東京都'],
+    南関東: ['神奈川県', '山梨県'],
+    信越: ['新潟県', '長野県'],
+    北陸: ['富山県', '石川県', '福井県'],
+    東海: ['岐阜県', '静岡県', '愛知県', '三重県'],
+    近畿: ['滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
+    中国: ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
+    四国: ['徳島県', '香川県', '愛媛県', '高知県'],
+    九州: ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'],
+    沖縄: ['沖縄県'],
+  };
   const fareRows = [
-    ['ヤマト運輸 宅急便'],
-    ['着地', '北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'],
-    ['都道府県', '北海道', '青森県', '宮城県', '茨城県', '東京都', '新潟県', '富山県', '愛知県', '大阪府', '岡山県', '香川県', '福岡県', '沖縄県'],
-    ['都道府県', '', '岩手県', '山形県', '栃木県', '', '長野県', '石川県', '岐阜県', '京都府', '広島県', '徳島県', '佐賀県', ''],
-    ['都道府県', '', '秋田県', '福島県', '群馬県', '', '', '福井県', '静岡県', '兵庫県', '山口県', '愛媛県', '長崎県', ''],
-    ['都道府県', '', '', '', '埼玉県', '', '', '', '三重県', '奈良県', '鳥取県', '高知県', '熊本県', ''],
-    ['都道府県', '', '', '', '千葉県', '', '', '', '', '滋賀県', '島根県', '', '大分県', ''],
-    ['都道府県', '', '', '', '神奈川県', '', '', '', '', '和歌山県', '', '', '宮崎県', ''],
-    ['都道府県', '', '', '', '山梨県', '', '', '', '', '', '', '', '鹿児島県', ''],
-    ['３辺合計(cm)', '重量(kg)', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['60', '2', '700', '500', '460', '430', '430', '460', '460', '460', '500', '550', '550', '700', '1240'],
-    ['80', '5', '900', '700', '660', '480', '480', '660', '660', '660', '700', '770', '770', '900', '1740'],
-    ['100', '10', '1100', '900', '860', '650', '650', '860', '860', '860', '900', '990', '990', '800', '2240'],
-    ['120', '15', '1300', '1100', '1060', '850', '850', '1060', '1060', '1060', '1100', '1210', '1210', '1300', '2740'],
-    ['140', '20', '1500', '1300', '1260', '1050', '1050', '1260', '1260', '1260', '1300', '1430', '1430', '1500', '3260'],
-    ['160', '25', '1700', '1500', '1460', '1250', '1250', '1460', '1460', '1460', '1500', '1650', '1650', '1700', '3780'],
+    ...matrixRows('ヤマト運輸', yamatoZones, yamatoGroups, [
+      ['60', '2', '700', '500', '460', '430', '430', '460', '460', '460', '500', '550', '550', '700', '1240'],
+      ['80', '5', '900', '700', '660', '480', '480', '660', '660', '660', '700', '770', '770', '900', '1740'],
+      ['100', '10', '1100', '900', '860', '650', '650', '860', '860', '860', '900', '990', '990', '800', '2240'],
+      ['120', '15', '1300', '1100', '1060', '850', '850', '1060', '1060', '1060', '1100', '1210', '1210', '1300', '2740'],
+      ['140', '20', '1500', '1300', '1260', '1050', '1050', '1260', '1260', '1260', '1300', '1430', '1430', '1500', '3260'],
+      ['160', '25', '1700', '1500', '1460', '1250', '1250', '1460', '1460', '1460', '1500', '1650', '1650', '1700', '3780'],
+    ]),
+    [],
+    ...matrixRows('佐川急便 飛脚宅配便', sagawaZones, sagawaGroups, [
+      ['60', '2', '770', '550', '520', '500', '520', '520', '520', '550', '620', '650', '720', '760', '1300'],
+      ['80', '5', '990', '770', '740', '700', '740', '740', '740', '770', '850', '880', '980', '1020', '1800'],
+      ['100', '10', '1210', '990', '960', '900', '960', '960', '960', '990', '1080', '1120', '1230', '1280', '2300'],
+      ['120', '15', '1430', '1210', '1180', '1100', '1180', '1180', '1180', '1210', '1320', '1360', '1490', '1540', '2800'],
+      ['140', '20', '1650', '1430', '1400', '1300', '1400', '1400', '1400', '1430', '1560', '1600', '1750', '1800', '3300'],
+      ['160', '25', '1870', '1650', '1620', '1500', '1620', '1620', '1620', '1650', '1800', '1840', '2010', '2060', '3800'],
+    ]),
+    [],
+    ...matrixRows('日本郵便 ゆうパック', postZones, postGroups, [
+      ['60', '25', '1410', '880', '880', '820', '880', '880', '880', '880', '990', '1150', '1150', '1410', '1450'],
+      ['80', '25', '1710', '1200', '1200', '1130', '1200', '1200', '1200', '1200', '1310', '1440', '1440', '1710', '1810'],
+      ['100', '25', '2020', '1500', '1500', '1450', '1500', '1500', '1500', '1500', '1620', '1780', '1780', '2020', '2160'],
+      ['120', '25', '2340', '1830', '1830', '1770', '1830', '1830', '1830', '1830', '1940', '2080', '2080', '2340', '2490'],
+      ['140', '25', '2680', '2170', '2170', '2120', '2170', '2170', '2170', '2170', '2300', '2440', '2440', '2680', '2860'],
+      ['160', '25', '3010', '2500', '2500', '2450', '2500', '2500', '2500', '2500', '2610', '2750', '2750', '3010', '3180'],
+    ]),
   ];
   if (type === 'products') return productRows;
   if (type === 'orders') return orderRows;
@@ -1602,12 +1675,12 @@ function recordFareImportIssues(rows, fareFormat, matrixView, normalizedRows, so
   const issues = [];
   const headers = Object.keys(rows[0] || {});
   const normalizedHeaders = headers.map((header) => normalizeHeader(header));
-  const zoneSignals = ['北海道', '東北', '東京', '東京都', '関東', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
+  const zoneSignals = ['北海道', '東北', '北東北', '南東北', '東京', '東京都', '関東', '南関東', '信越', '北陸', '中部', '東海', '関西', '近畿', '中国', '四国', '九州', '北九州', '南九州', '沖縄'];
   const knownMatrixHeaders = ['size', 'サイズ', 'サイズ(cm)', 'サイズ(mm)', '総長', '重量', '重量kg', '重量(kg)', 'weight', 'weightlimit'];
   const knownVerticalHeaders = ['carrier', '配送会社', 'service', 'サービス', 'size', 'サイズ', 'zone', '地域', '配送地域', 'fare', '運賃', '送料', 'weightlimit', '重量', '重量kg'];
   const hasZoneColumn = normalizedHeaders.some((header) => ['zone', '地域', '配送地域', '地区'].includes(header) || zoneSignals.includes(header)) || Boolean(matrixView?.zoneHeaders?.length);
   if (fareFormat === 'matrix' && matrixView?.rows?.length && normalizedRows?.length) {
-    const knownMatrixZones = ['北海道', '北東北', '南東北', '関東', '東京', '東京都', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
+    const knownMatrixZones = ['北海道', '東北', '北東北', '南東北', '関東', '東京', '東京都', '南関東', '信越', '北陸', '中部', '東海', '関西', '近畿', '中国', '四国', '九州', '北九州', '南九州', '沖縄'];
     matrixView.zoneHeaders
       .filter((zone) => normalize(zone) && !knownMatrixZones.includes(normalize(zone)))
       .forEach((zone) => {
@@ -1788,7 +1861,7 @@ function isJapanesePrefecture(value) {
   return japanesePrefectures.includes(compactText(value));
 }
 
-const japaneseMatrixZones = ['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
+const japaneseMatrixZones = ['北海道', '東北', '北東北', '南東北', '関東', '東京', '南関東', '信越', '北陸', '中部', '東海', '関西', '近畿', '中国', '四国', '九州', '北九州', '南九州', '沖縄'];
 
 function isValidMatrixZoneHeader(value) {
   const text = compactText(value);
@@ -1799,11 +1872,9 @@ function isValidMatrixZoneHeader(value) {
   return japaneseMatrixZones.includes(text) || /地方|地域|エリア|Zone|ZONE/.test(text);
 }
 
-function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackService = '宅急便') {
-  const rowArrays = rowArraysFromRows(rows).map((row) => Array.from({ length: row.length }, (_, index) => compactText(row[index])));
-  const zoneRowIndex = rowArrays.findIndex((row) => row.some((cell) => normalizeHeader(cell) === '着地'));
+function createRealMatrixViewFromRows(rowArrays, zoneRowIndex, fallbackCarrier = 'ヤマト', fallbackService = '宅急便', endIndex = rowArrays.length) {
   if (zoneRowIndex < 0) return null;
-  const headerRowIndex = rowArrays.findIndex((row, index) => index > zoneRowIndex && row.some(isMatrixSizeHeader) && row.some(isMatrixWeightHeader));
+  const headerRowIndex = rowArrays.findIndex((row, index) => index > zoneRowIndex && index < endIndex && row.some(isMatrixSizeHeader) && row.some(isMatrixWeightHeader));
   if (headerRowIndex < 0) return null;
   const headerRow = rowArrays[headerRowIndex];
   const sizeIndex = headerRow.findIndex(isMatrixSizeHeader);
@@ -1816,7 +1887,7 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
     .map((zone, index) => ({ zone, index, fareIndex: dataStartIndex + index - zoneStartIndex }))
     .filter(({ zone, index }) => index >= zoneStartIndex && isValidMatrixZoneHeader(zone));
   if (!zoneEntries.length) return null;
-  const title = rowArrays.slice(0, zoneRowIndex).flat().filter(Boolean).join(' ');
+  const title = [...rowArrays.slice(0, zoneRowIndex)].reverse().find((row) => row.some((cell) => normalize(cell) && normalizeHeader(cell) !== '着地' && !isMatrixSizeHeader(cell) && !isMatrixWeightHeader(cell)))?.filter(Boolean).join(' ') || '';
   const { carrier, service } = inferMatrixCarrierService(title, fallbackCarrier, fallbackService);
   const rawCarrierLabel = compactText(title.replace(service, '').trim()) || carrier;
   const zoneGroups = Object.fromEntries(zoneEntries.map(({ zone, index }) => [
@@ -1845,7 +1916,7 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
     zoneHeaders: zoneEntries.map(({ zone }) => zone),
     zoneGroups,
     prefectureRows,
-    rows: rowArrays.slice(headerRowIndex + 1).map((row) => ({
+    rows: rowArrays.slice(headerRowIndex + 1, endIndex).map((row) => ({
       size: row[sizeIndex],
       weight: row[weightIndex],
       fares: Object.fromEntries(zoneEntries.map(({ zone, fareIndex }) => [zone, row[fareIndex] || ''])),
@@ -1853,10 +1924,25 @@ function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackServi
   });
 }
 
+function createRealMatrixViews(rows, fallbackCarrier = 'ヤマト', fallbackService = '宅急便') {
+  const rowArrays = rowArraysFromRows(rows).map((row) => Array.from({ length: row.length }, (_, index) => compactText(row[index])));
+  const zoneRowIndexes = rowArrays
+    .map((row, index) => (row.some((cell) => normalizeHeader(cell) === '着地') ? index : -1))
+    .filter((index) => index >= 0);
+  return zoneRowIndexes
+    .map((zoneRowIndex, index) => createRealMatrixViewFromRows(rowArrays, zoneRowIndex, fallbackCarrier, fallbackService, zoneRowIndexes[index + 1] ?? rowArrays.length))
+    .filter((view) => view?.rows?.length);
+}
+
+function createRealMatrixView(rows, fallbackCarrier = 'ヤマト', fallbackService = '宅急便') {
+  return createRealMatrixViews(rows, fallbackCarrier, fallbackService)[0] || null;
+}
+
 function createMatrixView(rows, carrierName = 'ヤマト', serviceName = '宅急便') {
   if (!rows.length) return null;
-  const realMatrixView = createRealMatrixView(rows, carrierName, serviceName);
-  if (realMatrixView) return realMatrixView;
+  const realMatrixViews = createRealMatrixViews(rows, carrierName, serviceName);
+  if (realMatrixViews.length > 1) return makeMatrixViewState(realMatrixViews);
+  if (realMatrixViews.length === 1) return realMatrixViews[0];
   const headers = Object.keys(rows[0] || {}).map((header) => normalizeHeader(header));
   const sizeHeader = headers[0];
   const weightHeader = headers.find((header) => ['weight', '重量', '重量(kg)', '重量kg', 'weightlimit'].includes(header));

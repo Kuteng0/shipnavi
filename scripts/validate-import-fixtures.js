@@ -838,8 +838,8 @@ async function validateImportTemplates() {
     { type: 'products', format: 'xlsx', headers: ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否'], exampleSku: 'SKU-001' },
     { type: 'orders', format: 'csv', headers: ['注文番号', '顧客名', '郵便番号', '配送先住所', 'SKU', '数量'], exampleSku: 'SKU-001' },
     { type: 'orders', format: 'xlsx', headers: ['注文番号', '顧客名', '郵便番号', '配送先住所', 'SKU', '数量'], exampleSku: 'SKU-001' },
-    { type: 'fares', format: 'csv', headers: ['ヤマト運輸 宅急便', '着地', '北海道', '関東', '東京', '３辺合計(cm)', '重量(kg)'], exampleSku: '60', matrixTemplate: true },
-    { type: 'fares', format: 'xlsx', headers: ['ヤマト運輸 宅急便', '着地', '北海道', '関東', '東京', '３辺合計(cm)', '重量(kg)'], exampleSku: '60', matrixTemplate: true },
+    { type: 'fares', format: 'csv', headers: ['ヤマト運輸', '佐川急便 飛脚宅配便', '日本郵便 ゆうパック', '着地', '北海道', '関東', '東京', '3辺合計(cm)', '重量(kg)'], exampleSku: '60', matrixTemplate: true },
+    { type: 'fares', format: 'xlsx', headers: ['ヤマト運輸', '佐川急便 飛脚宅配便', '日本郵便 ゆうパック', '着地', '北海道', '関東', '東京', '3辺合計(cm)', '重量(kg)'], exampleSku: '60', matrixTemplate: true },
   ];
 
   for (const testCase of cases) {
@@ -854,6 +854,18 @@ async function validateImportTemplates() {
     if (testCase.format === 'csv') {
       const parsedRows = parseCsvText(template.csvText);
       assertTruthy(`${testCase.type} csv template can be parsed for upload`, parsedRows.length > 0, { field: 'csvText', actual: parsedRows.length });
+      if (testCase.matrixTemplate) {
+        const rawRows = template.rows;
+        const format = callFunction('detectFareTableFormat', [rawRows[0] || [], rawRows]);
+        const matrixView = callFunction('createMatrixView', [rawRows, 'ヤマト', '宅急便']);
+        const normalizedRows = callFunction('normalizeFareMatrix', [rawRows, 'ヤマト', '宅急便']);
+        assertEqual(`${testCase.type} csv template parses as matrix`, format, 'matrix', { field: 'fareFormat' });
+        assertTruthy(`${testCase.type} csv template includes three carrier matrices`, ['ヤマト', '佐川', '日本郵便'].every((carrier) => normalizedRows.some((fare) => fare.carrier === carrier)), { field: 'normalizedFareRows', actual: [...new Set(normalizedRows.map((fare) => fare.carrier))] });
+        resetImportIssues();
+        const issues = callFunction('recordFareImportIssues', [rawRows, format, matrixView, normalizedRows, template.fileName]);
+        assertEqual(`${testCase.type} csv template upload warningCount is 0`, issues.length, 0, { field: 'warningCount', actual: issues });
+        assertEqual(`${testCase.type} csv template upload unresolvedIssues is 0`, getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
+      }
     } else {
       assertEqual(`${testCase.type} xlsx template Sheet1 name`, template.sheets[0]?.name, '入力データ', { field: 'sheetName' });
       assertEqual(`${testCase.type} xlsx template Sheet2 name`, template.sheets[1]?.name, '入力説明', { field: 'sheetName' });
@@ -867,7 +879,14 @@ async function validateImportTemplates() {
         const parsedValues = (parsed.rawRows || []).flat();
         testCase.headers.forEach((header) => assertIncludes(`${testCase.type} xlsx parsed matrix value ${header}`, parsedValues, header, { field: 'rawRows' }));
         const matrixView = callFunction('createMatrixView', [parsed.rawRows, 'ヤマト', '宅急便']);
+        const format = callFunction('detectFareTableFormat', [parsed.rawRows[0] || [], parsed.rawRows]);
+        const normalizedRows = callFunction('normalizeFareMatrix', [parsed.rawRows, 'ヤマト', '宅急便']);
         assertTruthy(`${testCase.type} xlsx template parses as real matrix`, matrixView?.rows?.length > 0, { field: 'matrixView' });
+        assertTruthy(`${testCase.type} xlsx template includes three carrier matrices`, ['ヤマト', '佐川', '日本郵便'].every((carrier) => normalizedRows.some((fare) => fare.carrier === carrier)), { field: 'normalizedFareRows', actual: [...new Set(normalizedRows.map((fare) => fare.carrier))] });
+        resetImportIssues();
+        const issues = callFunction('recordFareImportIssues', [parsed.rawRows, format, matrixView, normalizedRows, template.fileName]);
+        assertEqual(`${testCase.type} xlsx template upload warningCount is 0`, issues.length, 0, { field: 'warningCount', actual: issues });
+        assertEqual(`${testCase.type} xlsx template upload unresolvedIssues is 0`, getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
       } else {
         testCase.headers.forEach((header) => assertIncludes(`${testCase.type} xlsx parsed header ${header}`, parsedHeaders, vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx), { field: 'headers' }));
       }
