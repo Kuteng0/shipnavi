@@ -2373,6 +2373,7 @@ function renderCarriers(filter = '') {
     }
     tbody.innerHTML = matchingTables.map(({ matrix, tableIndex }) => {
       const zoneHeaderCells = matrix.zoneHeaders.map((zone) => `<th>${escapeHtml(zone)}</th>`).join('');
+      const matrixColGroup = `<colgroup><col class="matrix-col-size" /><col class="matrix-col-weight" />${matrix.zoneHeaders.map(() => '<col class="matrix-col-zone" />').join('')}</colgroup>`;
       const prefectureRows = (matrix.prefectureRows?.length ? matrix.prefectureRows : []).map((prefectureRow) => `
         <tr>
           <th>${escapeHtml(prefectureRow.label || '')}</th>
@@ -2405,6 +2406,7 @@ function renderCarriers(filter = '') {
             </div>
             <div class="responsive-table matrix-table-wrap">
             <table class="matrix-table">
+              ${matrixColGroup}
               <thead>
                 <tr class="matrix-zone-row"><th>着地</th><th></th>${zoneHeaderCells}</tr>
                 ${prefectureRows}

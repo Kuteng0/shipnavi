@@ -491,9 +491,12 @@ async function validateFareFixtures() {
   assertEqual('CSV and XLSX equivalent normalizedFareRows count match', xlsxStyleXlsxRows.length, xlsxStyleCsvRows.length, { field: 'normalizedFareRows.length' });
   assertEqual('CSV and XLSX equivalent normalizedFareRows values match', JSON.stringify(fareComparableRows(xlsxStyleXlsxRows)), JSON.stringify(fareComparableRows(xlsxStyleCsvRows)), { field: 'normalizedFareRows' });
   assertEqual('XLSX-style matrix zoneCount is 13', xlsxStyleXlsxView.zoneHeaders.length, 13, { field: 'matrixView.zoneHeaders', actual: xlsxStyleXlsxView.zoneHeaders });
+  assertEqual('XLSX-style matrix first zone is 北海道', xlsxStyleXlsxView.zoneHeaders[0], '北海道', { field: 'matrixView.zoneHeaders[0]', actual: xlsxStyleXlsxView.zoneHeaders });
+  assertEqual('XLSX-style matrix second zone is 北東北', xlsxStyleXlsxView.zoneHeaders[1], '北東北', { field: 'matrixView.zoneHeaders[1]', actual: xlsxStyleXlsxView.zoneHeaders });
   assertIncludes('XLSX-style matrix keeps 北海道 zone header', xlsxStyleXlsxView.zoneHeaders, '北海道', { field: 'matrixView.zoneHeaders' });
   assertTruthy('XLSX-style matrix has no extra 2 zone column', !xlsxStyleXlsxView.zoneHeaders.includes('2'), { field: 'matrixView.zoneHeaders', actual: xlsxStyleXlsxView.zoneHeaders });
   assertEqual('XLSX-style matrix preserves exact zone order', JSON.stringify(xlsxStyleXlsxView.zoneHeaders), JSON.stringify(['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄']), { field: 'matrixView.zoneHeaders' });
+  assertEqual('XLSX-style matrix preserves 九州 prefecture group', JSON.stringify(xlsxStyleXlsxView.zoneGroups?.九州), JSON.stringify(['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県']), { field: 'matrixView.zoneGroups.九州' });
   assertEqual('XLSX-style matrix first display row keeps 北海道 prefecture cell', xlsxStyleXlsxView.prefectureRows?.[0]?.cells?.北海道, '北海道', { field: 'matrixView.prefectureRows' });
   assertEqual('XLSX-style matrix preserves blank prefecture row label', xlsxStyleXlsxView.prefectureRows?.[1]?.label, '', { field: 'matrixView.prefectureRows' });
   assertEqual('XLSX-style matrix keeps blank second visual column via display rows', xlsxStyleXlsxView.prefectureRows?.[1]?.cells?.北海道, '', { field: 'matrixView.prefectureRows' });

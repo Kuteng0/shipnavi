@@ -923,16 +923,27 @@ td {
 }
 
 .matrix-table {
-  min-width: 1080px;
+  min-width: 1140px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
 }
 
+.matrix-col-size {
+  width: 112px;
+}
+
+.matrix-col-weight {
+  width: 92px;
+}
+
+.matrix-col-zone {
+  width: 72px;
+}
+
 .matrix-table th,
 .matrix-table td {
   height: 38px;
-  min-width: 72px;
   padding: 6px 8px;
   overflow: hidden;
   text-align: center;
@@ -964,8 +975,6 @@ td {
   position: sticky;
   left: 0;
   z-index: 3;
-  width: 112px;
-  min-width: 112px;
   background: #f8fafc;
 }
 
@@ -974,8 +983,6 @@ td {
   position: sticky;
   left: 112px;
   z-index: 3;
-  width: 92px;
-  min-width: 92px;
   background: #f8fafc;
 }
 
