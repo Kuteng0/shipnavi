@@ -509,6 +509,75 @@ async function validateFareFixtures() {
   assertEqual('XLSX-style successful matrix warningCount is 0', xlsxStyleIssues.length, 0, { field: 'warningCount', actual: xlsxStyleIssues });
   assertEqual('XLSX-style successful matrix unresolvedIssues is 0', getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
 
+  const manualMappingRows = [
+    ['ヤマト運輸 宅急便'],
+    ['配送先', '', '北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'],
+    ['都道府県', '', '北海道', '青森県', '宮城県', '茨城県', '東京都', '新潟県', '富山県', '愛知県', '大阪府', '岡山県', '香川県', '福岡県', '沖縄県'],
+    ['', '', '', '岩手県', '山形県', '栃木県', '', '長野県', '石川県', '岐阜県', '京都府', '広島県', '徳島県', '佐賀県', ''],
+    ['', '', '', '秋田県', '福島県', '群馬県', '', '', '福井県', '静岡県', '兵庫県', '山口県', '愛媛県', '長崎県', ''],
+    ['', '', '', '', '', '埼玉県', '', '', '', '三重県', '奈良県', '鳥取県', '高知県', '熊本県', ''],
+    ['', '', '', '', '', '千葉県', '', '', '', '', '滋賀県', '島根県', '', '大分県', ''],
+    ['', '', '', '', '', '神奈川県', '', '', '', '', '和歌山県', '', '', '宮崎県', ''],
+    ['', '', '', '', '', '山梨県', '', '', '', '', '', '', '', '鹿児島県', ''],
+    ['３辺合計(cm)', '重量(kg)', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['60', '2', '700', '500', '460', '430', '430', '460', '460', '460', '500', '550', '550', '700', '1240'],
+    ['80', '5', '900', '700', '660', '480', '480', '660', '660', '660', '700', '770', '770', '900', '1740'],
+    ['100', '10', '1100', '900', '860', '650', '650', '860', '860', '860', '900', '990', '990', '800', '2240'],
+    ['120', '15', '1300', '1100', '1060', '850', '850', '1060', '1060', '1060', '1100', '1210', '1210', '1300', '2740'],
+    ['140', '20', '1500', '1300', '1260', '1050', '1050', '1260', '1260', '1260', '1300', '1430', '1430', '1500', '3260'],
+    ['160', '25', '1700', '1500', '1460', '1250', '1250', '1460', '1460', '1460', '1500', '1650', '1650', '1700', '3780'],
+  ];
+  const manualHeaders = manualMappingRows[0];
+  const manualFormat = callFunction('detectFareTableFormat', [manualHeaders, manualMappingRows]);
+  assertEqual('low-confidence XLSX-style matrix is not imported as a confident matrix', manualFormat, 'unknown', { field: 'fareFormat' });
+  assertTruthy('low-confidence XLSX-style matrix goes to mapping wizard state', callFunction('shouldOpenFareMappingWizard', [manualFormat, null, []]), { field: 'mappingWizard' });
+  const manualRule = {
+    name: 'ヤマト手動マッピング',
+    carrier: 'ヤマト',
+    service: '宅急便',
+    carrierCell: 'A1',
+    zoneHeaderRow: 2,
+    zoneStartCol: 'C',
+    zoneEndCol: 'O',
+    prefectureStartRow: 3,
+    prefectureEndRow: 9,
+    sizeCol: 'A',
+    weightCol: 'B',
+    fareStartRow: 11,
+    fareEndRow: 16,
+  };
+  const manualPreview = callFunction('previewFareImportMapping', [manualMappingRows, manualRule]);
+  assertTruthy('manual fare mapping creates matrixView', manualPreview.matrixView?.rows?.length > 0, { field: 'matrixView' });
+  assertTruthy('manual fare mapping creates normalizedFareRows', manualPreview.normalizedFareRows.length > 0, { field: 'normalizedFareRows.length', actual: manualPreview.normalizedFareRows.length });
+  assertEqual('manual fare mapping preserves zone count', manualPreview.matrixView.zoneHeaders.length, 13, { field: 'matrixView.zoneHeaders' });
+  assertEqual('manual fare mapping first zone is 北海道', manualPreview.matrixView.zoneHeaders[0], '北海道', { field: 'matrixView.zoneHeaders' });
+  assertEqual('manual fare mapping 80 関東 fare', manualPreview.normalizedFareRows.find((fare) => fare.zone === '関東' && fare.size === '80' && fare.weight === '5')?.fare, '480', { field: 'normalizedFareRows' });
+  resetImportIssues();
+  const manualIssues = callFunction('recordFareImportIssues', [manualMappingRows, 'matrix', manualPreview.matrixView, manualPreview.normalizedFareRows, 'manual-mapping.xlsx']);
+  assertEqual('valid manual mapping warningCount is 0', manualIssues.length, 0, { field: 'warningCount', actual: manualIssues });
+  assertEqual('valid manual mapping unresolvedIssues is 0', getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
+  setData('shipnaviFareImportMappingRules', []);
+  const savedManualRule = callFunction('saveFareImportMappingRule', [manualRule]);
+  const savedRules = callFunction('getFareImportMappingRules', []);
+  assertTruthy('manual mapping rule is saved to LocalStorage', savedRules.some((rule) => rule.name === savedManualRule.name), { field: 'shipnaviFareImportMappingRules', actual: savedRules });
+  const reusedPreview = callFunction('previewFareImportMapping', [manualMappingRows, savedRules.find((rule) => rule.name === savedManualRule.name)]);
+  assertEqual('saved mapping rule can be reused', JSON.stringify(fareComparableRows(reusedPreview.normalizedFareRows)), JSON.stringify(fareComparableRows(manualPreview.normalizedFareRows)), { field: 'normalizedFareRows' });
+  const sagawaManualPreview = callFunction('previewFareImportMapping', [manualMappingRows, { ...manualRule, name: '佐川手動マッピング', carrier: '佐川', service: '飛脚宅配便' }]);
+  setData('shipnaviDashboardFareTables', { matrixView: null, normalizedFareRows: [] });
+  callFunction('mergeImportedFareTable', [manualPreview.matrixView, manualPreview.normalizedFareRows]);
+  callFunction('mergeImportedFareTable', [sagawaManualPreview.matrixView, sagawaManualPreview.normalizedFareRows]);
+  let manualFareState = callFunction('getFareTableState', []);
+  assertTruthy('manual mapping import appends another carrier', ['ヤマト', '佐川'].every((carrier) => manualFareState.normalizedFareRows.some((fare) => fare.carrier === carrier)), { field: 'normalizedFareRows', actual: [...new Set(manualFareState.normalizedFareRows.map((fare) => fare.carrier))] });
+  const replacementManualRows = manualPreview.normalizedFareRows.map((fare) => (fare.carrier === 'ヤマト' && fare.service === '宅急便' && fare.size === '60' && fare.zone === '北海道' ? { ...fare, fare: '701' } : fare));
+  callFunction('mergeImportedFareTable', [manualPreview.matrixView, replacementManualRows]);
+  manualFareState = callFunction('getFareTableState', []);
+  const yamatoManualHokkaido60 = manualFareState.normalizedFareRows.filter((fare) => fare.carrier === 'ヤマト' && fare.service === '宅急便' && fare.size === '60' && fare.zone === '北海道');
+  assertEqual('manual mapping same carrier/service replaces only that table', yamatoManualHokkaido60.length, 1, { field: 'normalizedFareRows' });
+  assertEqual('manual mapping replacement updates the same table', yamatoManualHokkaido60[0]?.fare, '701', { field: 'fare' });
+  assertTruthy('manual mapping replacement preserves unrelated carrier', manualFareState.normalizedFareRows.some((fare) => fare.carrier === '佐川'), { field: 'normalizedFareRows' });
+  manualFareState = callFunction('deleteFareTableByScope', ['ヤマト', '宅急便']);
+  assertTruthy('manual mapping delete removes one carrier/service only', !manualFareState.normalizedFareRows.some((fare) => fare.carrier === 'ヤマト') && manualFareState.normalizedFareRows.some((fare) => fare.carrier === '佐川'), { field: 'normalizedFareRows', actual: [...new Set(manualFareState.normalizedFareRows.map((fare) => fare.carrier))] });
+
   setData('shipnaviDashboardFareTables', { matrixView: null, normalizedFareRows: [
     { carrier: '佐川', service: '飛脚宅配便', size: '60', zone: '東京', fare: '990', weightLimit: '2000' },
   ] });

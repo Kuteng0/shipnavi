@@ -1029,6 +1029,108 @@ td {
   font-variant-numeric: tabular-nums;
 }
 
+.fare-mapping-wizard {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.fare-mapping-wizard[hidden] {
+  display: none;
+}
+
+.mapping-wizard-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mapping-wizard-header h3,
+.mapping-wizard-layout h4 {
+  margin: 0 0 6px;
+}
+
+.mapping-wizard-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.mapping-control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.fare-preview-grid-wrap {
+  width: 100%;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.fare-preview-grid {
+  min-width: 980px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.fare-preview-grid th,
+.fare-preview-grid td {
+  width: 7rem;
+  height: 32px;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  background: var(--white);
+}
+
+.fare-preview-grid thead th,
+.fare-preview-grid .preview-row-number {
+  position: sticky;
+  z-index: 2;
+  background: #f3f4f6;
+  text-align: center;
+  font-weight: 900;
+}
+
+.fare-preview-grid thead th {
+  top: 0;
+}
+
+.fare-preview-grid .preview-row-number {
+  left: 0;
+  width: 3rem;
+}
+
+.fare-preview-grid thead th:first-child {
+  left: 0;
+  z-index: 3;
+  width: 3rem;
+}
+
+.mapping-preview-result {
+  display: grid;
+  gap: 8px;
+}
+
+.mapping-preview-result p {
+  margin-bottom: 0;
+}
+
 .results-filter-toolbar {
   position: sticky;
   top: 0;
@@ -1158,5 +1260,15 @@ td {
 
   .results-filter-toolbar {
     grid-template-columns: minmax(10rem, 1fr) minmax(18rem, 0.9fr) auto;
+  }
+}
+
+@media (min-width: 1100px) {
+  .mapping-wizard-layout {
+    grid-template-columns: minmax(0, 1.2fr) minmax(20rem, 0.8fr);
+  }
+
+  .mapping-wizard-layout section:last-child {
+    grid-column: 1 / -1;
   }
 }
