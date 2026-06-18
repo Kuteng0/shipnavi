@@ -982,6 +982,16 @@ async function validateImportTemplates() {
     });
     assertTruthy(`${label} Japan Post template uses 25kg for all Yu-Pack sizes`, japanPostRows.length > 0 && japanPostRows.every((fare) => fare.weight === '25'), { field: 'normalizedFareRows.weight', actual: [...new Set(japanPostRows.map((fare) => `${fare.size}:${fare.weight}`))] });
   };
+  const registry = callFunction('getCarrierTemplateRegistry', []);
+  assertTruthy('carrier template registry contains Yamato', registry.some((template) => template.carrier === 'ヤマト運輸' && template.service === '宅急便'), { field: 'carrierTemplateRegistry' });
+  assertTruthy('carrier template registry contains Sagawa', registry.some((template) => template.carrier === '佐川急便' && template.service === '飛脚宅配便'), { field: 'carrierTemplateRegistry' });
+  assertTruthy('carrier template registry contains Japan Post', registry.some((template) => template.carrier === '日本郵便' && template.service === 'ゆうパック'), { field: 'carrierTemplateRegistry' });
+  const yamatoTemplate = registry.find((template) => template.id === 'yamato-takkyubin');
+  assertEqual('Yamato template sizes are correct', JSON.stringify(yamatoTemplate?.sizes), JSON.stringify([60, 80, 100, 120, 140, 160]), { field: 'sizes' });
+  assertEqual('Yamato template weight limits are correct', JSON.stringify(yamatoTemplate?.weightRules), JSON.stringify({ 60: 2, 80: 5, 100: 10, 120: 15, 140: 20, 160: 25 }), { field: 'weightRules' });
+  const japanPostTemplate = registry.find((template) => template.id === 'japanpost-yupack');
+  assertIncludes('Japan Post registry includes 170 size', japanPostTemplate?.sizes || [], 170, { field: 'sizes' });
+  assertTruthy('Japan Post registry weights are all 25kg', Object.values(japanPostTemplate?.weightRules || {}).every((weight) => weight === 25), { field: 'weightRules', actual: japanPostTemplate?.weightRules });
   const cases = [
     { type: 'products', format: 'csv', headers: ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否'], exampleSku: 'SKU-001' },
     { type: 'products', format: 'xlsx', headers: ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否'], exampleSku: 'SKU-001' },
@@ -1067,6 +1077,17 @@ async function validateImportTemplates() {
   assertTruthy('fares xlsx template explains matrix format', fareExplanation.includes('マトリクス形式'), { field: '入力説明' });
   assertTruthy('fares xlsx template explains Japan Post 25kg limit', fareExplanation.includes('日本郵便 ゆうパックは全サイズ共通で重量上限25kgです。'), { field: '入力説明' });
   assertTruthy('fares xlsx template explains Japan Post size priority', fareExplanation.includes('サイズ判定は三辺合計(cm)を優先します。'), { field: '入力説明' });
+  assertTruthy('fares xlsx template explains built-in template disclaimer', fareExplanation.includes('公開情報または標準的な地域区分を参考にしたテンプレートです。実際の契約運賃表を優先してください。'), { field: '入力説明' });
+  const selectedYamatoCsv = callFunction('generateImportTemplate', ['fares', 'csv', { carrierTemplateId: 'yamato-takkyubin' }]);
+  const selectedYamatoRows = callFunction('normalizeFareMatrix', [selectedYamatoCsv.rows, 'ヤマト', '宅急便']);
+  assertTruthy('selected Yamato CSV template is generated from registry only', selectedYamatoRows.length > 0 && selectedYamatoRows.every((fare) => fare.carrier === 'ヤマト'), { field: 'normalizedFareRows', actual: [...new Set(selectedYamatoRows.map((fare) => fare.carrier))] });
+  const selectedPostXlsx = callFunction('generateImportTemplate', ['fares', 'xlsx', { carrierTemplateId: 'japanpost-yupack' }]);
+  ctx.__selectedPostBuffer = selectedPostXlsx.arrayBuffer;
+  const selectedPostParsed = await vm.runInContext('parseXlsxArrayBuffer(__selectedPostBuffer)', ctx);
+  const selectedPostFormat = callFunction('detectFareTableFormat', [selectedPostParsed.rawRows[0] || [], selectedPostParsed.rawRows]);
+  const selectedPostRows = callFunction('normalizeFareMatrix', [selectedPostParsed.rawRows, '日本郵便', 'ゆうパック']);
+  assertTruthy('selected Japan Post XLSX template can be read or routed as matrix', selectedPostFormat === 'matrix' || selectedPostParsed.rawRows?.length > 0, { field: 'fareFormat', actual: selectedPostFormat });
+  assertJapanPostTemplateRows('selected Japan Post xlsx', selectedPostRows);
 }
 
 

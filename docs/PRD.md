@@ -50,6 +50,10 @@ Core requirements:
 - Import fare tables from CSV.
 - Keep fare data normalized for recommendation logic.
 - Preserve enough metadata to compare multiple carrier/service candidates.
+- Provide built-in reference templates for ヤマト運輸 / 宅急便, 佐川急便 / 飛脚宅配便, and 日本郵便 / ゆうパック.
+- Generate CSV / Excel fare templates from the built-in carrier template registry.
+- Treat uploaded customer contract fare tables as the source of truth when they differ from built-in or public reference templates.
+- Explain that built-in prefecture groups and fares are editable references, not guaranteed contract prices.
 
 ### 3.3 送料マトリクス
 

@@ -174,6 +174,25 @@ Requirements:
 
 ## 5. Fare table import mapping
 
+### 5.0 Built-in carrier template library
+
+Phase11 adds a built-in carrier fare template registry for:
+
+- ヤマト運輸 / 宅急便
+- 佐川急便 / 飛脚宅配便
+- 日本郵便 / ゆうパック
+
+The registry defines carrier name, service name, supported sizes, weight rules, default zone headers, prefecture groups, template notes, and matrix template structure. CSVテンプレート and Excelテンプレート must be generated from this registry instead of separate hard-coded matrix rows.
+
+Built-in templates are references. They use public information or standard regional grouping as a starting point, but they are not a guarantee of official or contracted pricing. Customer-uploaded contract fare tables are the source of truth and must override built-in/public templates.
+
+日本郵便 / ゆうパック template rules:
+
+- Supported sizes: 60, 80, 100, 120, 140, 160, 170.
+- Weight limit: 25kg for every size.
+- Template note: 日本郵便 ゆうパックは全サイズ共通で重量上限25kgです。
+- Template note: サイズ判定は三辺合計(cm)を優先します。
+
 ### 5.1 Vertical fare table
 
 Required fields:

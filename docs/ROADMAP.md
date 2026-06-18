@@ -222,6 +222,31 @@ Acceptance criteria:
 - Operators can reject AI suggestions and download a corrected template instead.
 - AI repair does not change fare calculation, postal-zone detection, or bundle eligibility directly.
 
+## Phase 11: Carrier Template Library
+
+Goal: make built-in carrier fare templates maintainable and transparent before adding carrier APIs or tenant infrastructure.
+
+Scope:
+
+- Create a structured built-in template registry for ヤマト運輸 / 宅急便, 佐川急便 / 飛脚宅配便, and 日本郵便 / ゆうパック.
+- Generate CSVテンプレート and Excelテンプレート from the registry.
+- Keep customer-uploaded contract fare tables as the source of truth.
+- Show built-in templates as editable references based on public information or standard regional grouping.
+- Add Japan Post / Yu-Pack 170-size template support and explicit 25kg weight guidance.
+- Suggest a matching built-in template in the mapping wizard when an uploaded table resembles one, without forcing the mapping.
+
+Non-goals:
+
+- Carrier API, Tracking API, Label API, multi-tenant storage, billing, and AI repair expansion.
+- Fare calculation, postal-zone detection, bundle eligibility, or shipment grouping changes except size-list compatibility needed for templates.
+
+Acceptance criteria:
+
+- Registry metadata includes carrier/service names, supported sizes, weight rules, zone headers, prefecture groups, notes, and matrix template structure.
+- Templates generated from the registry can be downloaded and re-imported.
+- Documentation states that customer contract fare tables override built-in/public templates.
+- Existing matrix import, mapping wizard, shipment queue, and P0 fare/postal/bundle/grouping checks remain passing.
+
 ## Cross-phase governance
 
 Every phase must preserve these review rules:

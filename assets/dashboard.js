@@ -540,7 +540,165 @@ function buildXlsxWorkbook(sheets) {
   return buildZip(entries);
 }
 
-function templateRowsFor(type) {
+const carrierTemplateDisclaimer = '公開情報または標準的な地域区分を参考にしたテンプレートです。実際の契約運賃表を優先してください。';
+
+const carrierFareTemplateRegistry = [
+  {
+    id: 'yamato-takkyubin',
+    carrier: 'ヤマト運輸',
+    normalizedCarrier: 'ヤマト',
+    service: '宅急便',
+    sizes: [60, 80, 100, 120, 140, 160],
+    weightRules: { 60: 2, 80: 5, 100: 10, 120: 15, 140: 20, 160: 25 },
+    zoneHeaders: ['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'],
+    prefectureGroups: {
+      北海道: ['北海道'],
+      北東北: ['青森県', '岩手県', '秋田県'],
+      南東北: ['宮城県', '山形県', '福島県'],
+      関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '神奈川県', '山梨県'],
+      東京: ['東京都'],
+      信越: ['新潟県', '長野県'],
+      北陸: ['富山県', '石川県', '福井県'],
+      中部: ['愛知県', '岐阜県', '静岡県', '三重県'],
+      関西: ['大阪府', '京都府', '兵庫県', '奈良県', '滋賀県', '和歌山県'],
+      中国: ['岡山県', '広島県', '山口県', '鳥取県', '島根県'],
+      四国: ['香川県', '徳島県', '愛媛県', '高知県'],
+      九州: ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'],
+      沖縄: ['沖縄県'],
+    },
+    templateNotes: [carrierTemplateDisclaimer, 'サイズ別の重量上限を契約運賃表に合わせて確認してください。'],
+    sampleFares: {
+      60: ['700', '500', '460', '430', '430', '460', '460', '460', '500', '550', '550', '700', '1240'],
+      80: ['900', '700', '660', '480', '480', '660', '660', '660', '700', '770', '770', '900', '1740'],
+      100: ['1100', '900', '860', '650', '650', '860', '860', '860', '900', '990', '990', '800', '2240'],
+      120: ['1300', '1100', '1060', '850', '850', '1060', '1060', '1060', '1100', '1210', '1210', '1300', '2740'],
+      140: ['1500', '1300', '1260', '1050', '1050', '1260', '1260', '1260', '1300', '1430', '1430', '1500', '3260'],
+      160: ['1700', '1500', '1460', '1250', '1250', '1460', '1460', '1460', '1500', '1650', '1650', '1700', '3780'],
+    },
+  },
+  {
+    id: 'sagawa-hikyaku',
+    carrier: '佐川急便',
+    normalizedCarrier: '佐川',
+    service: '飛脚宅配便',
+    sizes: [60, 80, 100, 120, 140, 160],
+    weightRules: { 60: 2, 80: 5, 100: 10, 120: 15, 140: 20, 160: 25 },
+    zoneHeaders: ['北海道', '北東北', '南東北', '関東', '信越', '東海', '北陸', '関西', '中国', '四国', '北九州', '南九州', '沖縄'],
+    prefectureGroups: {
+      北海道: ['北海道'],
+      北東北: ['青森県', '岩手県', '秋田県'],
+      南東北: ['宮城県', '山形県', '福島県'],
+      関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県', '山梨県'],
+      信越: ['新潟県', '長野県'],
+      東海: ['岐阜県', '静岡県', '愛知県', '三重県'],
+      北陸: ['富山県', '石川県', '福井県'],
+      関西: ['滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
+      中国: ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
+      四国: ['徳島県', '香川県', '愛媛県', '高知県'],
+      北九州: ['福岡県', '佐賀県', '長崎県', '大分県'],
+      南九州: ['熊本県', '宮崎県', '鹿児島県'],
+      沖縄: ['沖縄県'],
+    },
+    templateNotes: [carrierTemplateDisclaimer, '契約運賃表に合わせて編集してください。'],
+    sampleFares: {
+      60: ['770', '550', '520', '500', '520', '520', '520', '550', '620', '650', '720', '760', '1300'],
+      80: ['990', '770', '740', '700', '740', '740', '740', '770', '850', '880', '980', '1020', '1800'],
+      100: ['1210', '990', '960', '900', '960', '960', '960', '990', '1080', '1120', '1230', '1280', '2300'],
+      120: ['1430', '1210', '1180', '1100', '1180', '1180', '1180', '1210', '1320', '1360', '1490', '1540', '2800'],
+      140: ['1650', '1430', '1400', '1300', '1400', '1400', '1400', '1430', '1560', '1600', '1750', '1800', '3300'],
+      160: ['1870', '1650', '1620', '1500', '1620', '1620', '1620', '1650', '1800', '1840', '2010', '2060', '3800'],
+    },
+  },
+  {
+    id: 'japanpost-yupack',
+    carrier: '日本郵便',
+    normalizedCarrier: '日本郵便',
+    service: 'ゆうパック',
+    sizes: [60, 80, 100, 120, 140, 160, 170],
+    weightRules: { 60: 25, 80: 25, 100: 25, 120: 25, 140: 25, 160: 25, 170: 25 },
+    zoneHeaders: ['北海道', '東北', '関東', '東京', '南関東', '信越', '北陸', '東海', '近畿', '中国', '四国', '九州', '沖縄'],
+    prefectureGroups: {
+      北海道: ['北海道'],
+      東北: ['青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
+      関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県'],
+      東京: ['東京都'],
+      南関東: ['神奈川県', '山梨県'],
+      信越: ['新潟県', '長野県'],
+      北陸: ['富山県', '石川県', '福井県'],
+      東海: ['岐阜県', '静岡県', '愛知県', '三重県'],
+      近畿: ['滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
+      中国: ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
+      四国: ['徳島県', '香川県', '愛媛県', '高知県'],
+      九州: ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'],
+      沖縄: ['沖縄県'],
+    },
+    templateNotes: [carrierTemplateDisclaimer, '日本郵便 ゆうパックは全サイズ共通で重量上限25kgです。', 'サイズ判定は三辺合計(cm)を優先します。'],
+    sampleFares: {
+      60: ['1410', '880', '880', '820', '880', '880', '880', '880', '990', '1150', '1150', '1410', '1450'],
+      80: ['1710', '1200', '1200', '1130', '1200', '1200', '1200', '1200', '1310', '1440', '1440', '1710', '1810'],
+      100: ['2020', '1500', '1500', '1450', '1500', '1500', '1500', '1500', '1620', '1780', '1780', '2020', '2160'],
+      120: ['2340', '1830', '1830', '1770', '1830', '1830', '1830', '1830', '1940', '2080', '2080', '2340', '2490'],
+      140: ['2680', '2170', '2170', '2120', '2170', '2170', '2170', '2170', '2300', '2440', '2440', '2680', '2860'],
+      160: ['3010', '2500', '2500', '2450', '2500', '2500', '2500', '2500', '2610', '2750', '2750', '3010', '3180'],
+      170: ['3330', '3070', '3070', '3000', '3070', '3070', '3070', '3070', '3750', '3890', '3890', '4350', '5030'],
+    },
+  },
+];
+
+function getCarrierTemplateRegistry() {
+  return carrierFareTemplateRegistry.map((template) => ({
+    ...template,
+    sizes: [...template.sizes],
+    weightRules: { ...template.weightRules },
+    zoneHeaders: [...template.zoneHeaders],
+    prefectureGroups: Object.fromEntries(Object.entries(template.prefectureGroups).map(([zone, prefectures]) => [zone, [...prefectures]])),
+    templateNotes: [...template.templateNotes],
+    sampleFares: Object.fromEntries(Object.entries(template.sampleFares).map(([size, fares]) => [size, [...fares]])),
+  }));
+}
+
+function carrierTemplateLabel(template) {
+  return `${template.carrier} ${template.service}`;
+}
+
+function findCarrierFareTemplate(templateId) {
+  return carrierFareTemplateRegistry.find((template) => template.id === templateId) || null;
+}
+
+function fareRowsFromCarrierTemplate(template) {
+  return template.sizes.map((size) => [
+    String(size),
+    String(template.weightRules[size] || ''),
+    ...(template.sampleFares[size] || template.zoneHeaders.map(() => '')),
+  ]);
+}
+
+function matrixRowsForCarrierTemplate(template) {
+  const maxPrefectureRows = Math.max(...template.zoneHeaders.map((zone) => template.prefectureGroups[zone]?.length || 0));
+  const prefectureRows = Array.from({ length: maxPrefectureRows }, (_, index) => [
+    index === 0 ? '都道府県' : '',
+    '',
+    ...template.zoneHeaders.map((zone) => template.prefectureGroups[zone]?.[index] || ''),
+  ]);
+  const title = template.id === 'yamato-takkyubin' ? template.carrier : carrierTemplateLabel(template);
+  return [
+    [title],
+    ['着地', '', ...template.zoneHeaders],
+    ...prefectureRows,
+    ['3辺合計(cm)', '重量(kg)', ...template.zoneHeaders.map(() => '')],
+    ...fareRowsFromCarrierTemplate(template),
+  ];
+}
+
+function carrierTemplateRows(templateId = '') {
+  const selected = templateId ? [findCarrierFareTemplate(templateId)].filter(Boolean) : carrierFareTemplateRegistry;
+  return selected.flatMap((template, index) => [
+    ...(index ? [[]] : []),
+    ...matrixRowsForCarrierTemplate(template),
+  ]);
+}
+
+function templateRowsFor(type, options = {}) {
   const productRows = [
     ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否', '注意事項'],
     ['SKU-001', 'サンプル商品', '500', '60', '20', '15', '10', '可', '重量はg、寸法はcmで入力してください。'],
@@ -549,101 +707,9 @@ function templateRowsFor(type) {
     ['注文番号', '顧客名', '郵便番号', '配送先住所', 'SKU', '数量', 'プラットフォーム', '注意事項'],
     ['ORD-001', '匿名顧客A', '100-0001', '東京都千代田区匿名1-1-1', 'SKU-001', '1', 'ShipNavi標準', '個人情報は匿名化してからアップロードしてください。'],
   ];
-  const matrixRows = (title, zoneHeaders, zoneGroups, fareRows) => {
-    const maxPrefectureRows = Math.max(...zoneHeaders.map((zone) => zoneGroups[zone]?.length || 0));
-    const prefectureRows = Array.from({ length: maxPrefectureRows }, (_, index) => [
-      index === 0 ? '都道府県' : '',
-      '',
-      ...zoneHeaders.map((zone) => zoneGroups[zone]?.[index] || ''),
-    ]);
-    return [
-      [title],
-      ['着地', '', ...zoneHeaders],
-      ...prefectureRows,
-      ['3辺合計(cm)', '重量(kg)', ...zoneHeaders.map(() => '')],
-      ...fareRows,
-    ];
-  };
-  const yamatoZones = ['北海道', '北東北', '南東北', '関東', '東京', '信越', '北陸', '中部', '関西', '中国', '四国', '九州', '沖縄'];
-  const yamatoGroups = {
-    北海道: ['北海道'],
-    北東北: ['青森県', '岩手県', '秋田県'],
-    南東北: ['宮城県', '山形県', '福島県'],
-    関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '神奈川県', '山梨県'],
-    東京: ['東京都'],
-    信越: ['新潟県', '長野県'],
-    北陸: ['富山県', '石川県', '福井県'],
-    中部: ['愛知県', '岐阜県', '静岡県', '三重県'],
-    関西: ['大阪府', '京都府', '兵庫県', '奈良県', '滋賀県', '和歌山県'],
-    中国: ['岡山県', '広島県', '山口県', '鳥取県', '島根県'],
-    四国: ['香川県', '徳島県', '愛媛県', '高知県'],
-    九州: ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'],
-    沖縄: ['沖縄県'],
-  };
-  const sagawaZones = ['北海道', '北東北', '南東北', '関東', '信越', '東海', '北陸', '関西', '中国', '四国', '北九州', '南九州', '沖縄'];
-  const sagawaGroups = {
-    北海道: ['北海道'],
-    北東北: ['青森県', '岩手県', '秋田県'],
-    南東北: ['宮城県', '山形県', '福島県'],
-    関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県', '山梨県'],
-    信越: ['新潟県', '長野県'],
-    東海: ['岐阜県', '静岡県', '愛知県', '三重県'],
-    北陸: ['富山県', '石川県', '福井県'],
-    関西: ['滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
-    中国: ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
-    四国: ['徳島県', '香川県', '愛媛県', '高知県'],
-    北九州: ['福岡県', '佐賀県', '長崎県', '大分県'],
-    南九州: ['熊本県', '宮崎県', '鹿児島県'],
-    沖縄: ['沖縄県'],
-  };
-  const postZones = ['北海道', '東北', '関東', '東京', '南関東', '信越', '北陸', '東海', '近畿', '中国', '四国', '九州', '沖縄'];
-  const postGroups = {
-    北海道: ['北海道'],
-    東北: ['青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
-    関東: ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県'],
-    東京: ['東京都'],
-    南関東: ['神奈川県', '山梨県'],
-    信越: ['新潟県', '長野県'],
-    北陸: ['富山県', '石川県', '福井県'],
-    東海: ['岐阜県', '静岡県', '愛知県', '三重県'],
-    近畿: ['滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
-    中国: ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
-    四国: ['徳島県', '香川県', '愛媛県', '高知県'],
-    九州: ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県'],
-    沖縄: ['沖縄県'],
-  };
-  const fareRows = [
-    ...matrixRows('ヤマト運輸', yamatoZones, yamatoGroups, [
-      ['60', '2', '700', '500', '460', '430', '430', '460', '460', '460', '500', '550', '550', '700', '1240'],
-      ['80', '5', '900', '700', '660', '480', '480', '660', '660', '660', '700', '770', '770', '900', '1740'],
-      ['100', '10', '1100', '900', '860', '650', '650', '860', '860', '860', '900', '990', '990', '800', '2240'],
-      ['120', '15', '1300', '1100', '1060', '850', '850', '1060', '1060', '1060', '1100', '1210', '1210', '1300', '2740'],
-      ['140', '20', '1500', '1300', '1260', '1050', '1050', '1260', '1260', '1260', '1300', '1430', '1430', '1500', '3260'],
-      ['160', '25', '1700', '1500', '1460', '1250', '1250', '1460', '1460', '1460', '1500', '1650', '1650', '1700', '3780'],
-    ]),
-    [],
-    ...matrixRows('佐川急便 飛脚宅配便', sagawaZones, sagawaGroups, [
-      ['60', '2', '770', '550', '520', '500', '520', '520', '520', '550', '620', '650', '720', '760', '1300'],
-      ['80', '5', '990', '770', '740', '700', '740', '740', '740', '770', '850', '880', '980', '1020', '1800'],
-      ['100', '10', '1210', '990', '960', '900', '960', '960', '960', '990', '1080', '1120', '1230', '1280', '2300'],
-      ['120', '15', '1430', '1210', '1180', '1100', '1180', '1180', '1180', '1210', '1320', '1360', '1490', '1540', '2800'],
-      ['140', '20', '1650', '1430', '1400', '1300', '1400', '1400', '1400', '1430', '1560', '1600', '1750', '1800', '3300'],
-      ['160', '25', '1870', '1650', '1620', '1500', '1620', '1620', '1620', '1650', '1800', '1840', '2010', '2060', '3800'],
-    ]),
-    [],
-    ...matrixRows('日本郵便 ゆうパック', postZones, postGroups, [
-      ['60', '25', '1410', '880', '880', '820', '880', '880', '880', '880', '990', '1150', '1150', '1410', '1450'],
-      ['80', '25', '1710', '1200', '1200', '1130', '1200', '1200', '1200', '1200', '1310', '1440', '1440', '1710', '1810'],
-      ['100', '25', '2020', '1500', '1500', '1450', '1500', '1500', '1500', '1500', '1620', '1780', '1780', '2020', '2160'],
-      ['120', '25', '2340', '1830', '1830', '1770', '1830', '1830', '1830', '1830', '1940', '2080', '2080', '2340', '2490'],
-      ['140', '25', '2680', '2170', '2170', '2120', '2170', '2170', '2170', '2170', '2300', '2440', '2440', '2680', '2860'],
-      ['160', '25', '3010', '2500', '2500', '2450', '2500', '2500', '2500', '2500', '2610', '2750', '2750', '3010', '3180'],
-      ['170', '25', '3330', '3070', '3070', '3000', '3070', '3070', '3070', '3070', '3750', '3890', '3890', '4350', '5030'],
-    ]),
-  ];
   if (type === 'products') return productRows;
   if (type === 'orders') return orderRows;
-  if (type === 'fares') return fareRows;
+  if (type === 'fares') return carrierTemplateRows(options.carrierTemplateId || '');
   return [];
 }
 
@@ -675,25 +741,28 @@ function templateDescriptionRows(type) {
       ['メルカリShops', '取引ID、お届け先氏名、郵便番号、お届け先住所、商品コード、数量を自動判定します。'],
     ];
   }
+  const templateNotes = carrierFareTemplateRegistry.flatMap((template) => template.templateNotes.map((note) => [carrierTemplateLabel(template), note]));
   return [
     ...common,
     ['マトリクス形式', '1行目に配送会社とサービス、着地行に地域、３辺合計(cm)と重量(kg)の行に見出しを入力します。'],
-    ['日本郵便 ゆうパック', '日本郵便 ゆうパックは全サイズ共通で重量上限25kgです。サイズ判定は三辺合計(cm)を優先します。'],
+    ...templateNotes,
     ['縦持ち形式', '配送会社、サービス、配送サイズ、配送地域、送料、重量上限を縦持ちで入力する既存形式も利用できます。'],
     ['注意事項', '金額は数字、¥、円、カンマを含めて入力できます。重量上限はkgまたはgで入力してください。'],
   ];
 }
 
-function generateImportTemplate(type, format) {
+function generateImportTemplate(type, format, options = {}) {
   const normalizedType = normalize(type);
   const normalizedFormat = normalize(format).toLowerCase();
-  const rows = templateRowsFor(normalizedType);
+  const rows = templateRowsFor(normalizedType, options);
   const descriptionRows = templateDescriptionRows(normalizedType);
   const prefix = { products: '商品マスタ', orders: '注文データ', fares: '送料マトリクス' }[normalizedType] || '取込';
   if (!rows.length || !['csv', 'xlsx'].includes(normalizedFormat)) {
     return { type: normalizedType, format: normalizedFormat, fileName: '', rows: [], sheets: [], errors: ['テンプレート種別を確認してください。'] };
   }
-  const fileName = `shipnavi-${normalizedType}-template.${normalizedFormat}`;
+  const selectedTemplate = normalizedType === 'fares' ? findCarrierFareTemplate(options.carrierTemplateId) : null;
+  const fileSuffix = selectedTemplate ? `-${selectedTemplate.id}` : '';
+  const fileName = `shipnavi-${normalizedType}${fileSuffix}-template.${normalizedFormat}`;
   const sheets = [
     { name: '入力データ', rows },
     { name: '入力説明', rows: descriptionRows },
@@ -704,8 +773,8 @@ function generateImportTemplate(type, format) {
   return { type: normalizedType, format: 'xlsx', fileName, rows, sheets, arrayBuffer: buildXlsxWorkbook(sheets), errors: [], label: prefix };
 }
 
-function downloadImportTemplate(type, format) {
-  const template = generateImportTemplate(type, format);
+function downloadImportTemplate(type, format, options = {}) {
+  const template = generateImportTemplate(type, format, options);
   if (template.errors?.length) return showToast(template.errors.join(' '));
   if (template.format === 'csv') {
     downloadBlob(template.fileName, new Blob([`\uFEFF${template.csvText}`], { type: 'text/csv;charset=utf-8' }));
@@ -2328,6 +2397,25 @@ function detectFareTableFormat(headers, rows) {
   return detectFareTableFormatDetails(headers, rows).format;
 }
 
+function suggestCarrierTemplateFromRows(rows) {
+  const rowArrays = rowArraysFromRows(rows).map((row) => row.map(compactText));
+  const allText = rowArrays.flat().join(' ');
+  const detectedZones = new Set(rowArrays.flat().filter(isKnownFareMappingZone));
+  const scored = carrierFareTemplateRegistry.map((template) => {
+    let score = 0;
+    if (allText.includes(template.carrier) || allText.includes(template.normalizedCarrier)) score += 3;
+    if (allText.includes(template.service)) score += 2;
+    score += template.zoneHeaders.filter((zone) => detectedZones.has(zone)).length / Math.max(1, template.zoneHeaders.length);
+    return { template, score };
+  }).sort((a, b) => b.score - a.score);
+  return scored[0]?.score >= 2 ? scored[0].template : null;
+}
+
+function carrierTemplateSuggestionMessage(rows) {
+  const template = suggestCarrierTemplateFromRows(rows);
+  return template ? `${carrierTemplateLabel(template)} の形式に近い表です。必要に応じてマッピングを調整してください。` : '';
+}
+
 function normalizeFareMatrix(matrixInput, carrierName = 'ヤマト', serviceName = '宅急便') {
   const matrixView = Array.isArray(matrixInput) ? createMatrixView(matrixInput, carrierName, serviceName) : normalizeMatrixView(matrixInput);
   const matrixTables = getMatrixTables(matrixView);
@@ -3393,7 +3481,8 @@ function initCarriers() {
         confidence.level = confidence.confidence >= 80 ? '高' : (confidence.confidence >= 50 ? '中' : '低');
         confidence.reasons = [...new Set([...(fareDetection.reasons || []), ...(confidence.reasons || [])])];
         if (confidence.confidence < 80) {
-          const message = '自動判定した運賃表の構造を確認できませんでした。マッピングを設定してください。';
+          const suggestion = carrierTemplateSuggestionMessage(sourceRows);
+          const message = ['自動判定した運賃表の構造を確認できませんでした。マッピングを設定してください。', suggestion].filter(Boolean).join(' ');
           showFareMappingWizard({ ...fileResult, confidence, fareFormat, matrixView, importedRows: imported }, sourceRows, file.name, carrierName, serviceName, message);
           setFareImportSummary(message);
           return showToast(message);
@@ -3401,7 +3490,8 @@ function initCarriers() {
       } else {
         const confidence = { ...getFareImportConfidence(fareFormat, matrixView, imported), confidence: fareDetection.confidence, reasons: fareDetection.reasons };
         confidence.level = confidence.confidence >= 80 ? '高' : (confidence.confidence >= 50 ? '中' : '低');
-        const message = '自動判定できない運賃表です。マッピングを設定してください。';
+        const suggestion = carrierTemplateSuggestionMessage(sourceRows);
+        const message = ['自動判定できない運賃表です。マッピングを設定してください。', suggestion].filter(Boolean).join(' ');
         showFareMappingWizard({ ...fileResult, confidence, fareFormat, matrixView, importedRows: imported }, sourceRows, file.name, carrierName, serviceName, message);
         setFareImportSummary(message);
         return showToast(message);
@@ -3796,7 +3886,8 @@ function initTemplateDownloadActions() {
   document.addEventListener('click', (event) => {
     const button = event.target.closest?.('[data-template-type][data-template-format]');
     if (!button) return;
-    downloadImportTemplate(button.dataset.templateType, button.dataset.templateFormat);
+    const carrierTemplateId = button.closest('form')?.querySelector('[name="carrierTemplateId"]')?.value || button.dataset.templateCarrierId || '';
+    downloadImportTemplate(button.dataset.templateType, button.dataset.templateFormat, { carrierTemplateId });
   });
 }
 
