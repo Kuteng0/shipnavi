@@ -974,6 +974,14 @@ function validatePersistentIssueStatusLifecycle() {
 
 
 async function validateImportTemplates() {
+  const assertJapanPostTemplateRows = (label, normalizedRows) => {
+    const japanPostRows = normalizedRows.filter((fare) => fare.carrier === '日本郵便' && fare.service === 'ゆうパック');
+    const sizes = [...new Set(japanPostRows.map((fare) => fare.size))];
+    ['60', '80', '100', '120', '140', '160', '170'].forEach((size) => {
+      assertIncludes(`${label} Japan Post template includes ${size} size`, sizes, size, { field: 'normalizedFareRows.size' });
+    });
+    assertTruthy(`${label} Japan Post template uses 25kg for all Yu-Pack sizes`, japanPostRows.length > 0 && japanPostRows.every((fare) => fare.weight === '25'), { field: 'normalizedFareRows.weight', actual: [...new Set(japanPostRows.map((fare) => `${fare.size}:${fare.weight}`))] });
+  };
   const cases = [
     { type: 'products', format: 'csv', headers: ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否'], exampleSku: 'SKU-001' },
     { type: 'products', format: 'xlsx', headers: ['SKU', '商品名', '重量', 'サイズ', '長さ', '幅', '高さ', '同梱可否'], exampleSku: 'SKU-001' },
@@ -1002,10 +1010,16 @@ async function validateImportTemplates() {
         const normalizedRows = callFunction('normalizeFareMatrix', [rawRows, 'ヤマト', '宅急便']);
         assertEqual(`${testCase.type} csv template parses as matrix`, format, 'matrix', { field: 'fareFormat' });
         assertTruthy(`${testCase.type} csv template includes three carrier matrices`, ['ヤマト', '佐川', '日本郵便'].every((carrier) => normalizedRows.some((fare) => fare.carrier === carrier)), { field: 'normalizedFareRows', actual: [...new Set(normalizedRows.map((fare) => fare.carrier))] });
+        assertJapanPostTemplateRows(`${testCase.type} csv`, normalizedRows);
         resetImportIssues();
         const issues = callFunction('recordFareImportIssues', [rawRows, format, matrixView, normalizedRows, template.fileName]);
         assertEqual(`${testCase.type} csv template upload warningCount is 0`, issues.length, 0, { field: 'warningCount', actual: issues });
         assertEqual(`${testCase.type} csv template upload unresolvedIssues is 0`, getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
+      } else if (testCase.type === 'orders') {
+        const result = callFunction('importOrderCsvRows', [parsedRows]);
+        resetImportIssues();
+        callFunction('recordOrderImportIssues', [result, template.fileName]);
+        assertTruthy(`${testCase.type} csv template has no false platform warning for プラットフォーム`, !getImportIssuesFromDashboard().some((issue) => issue.type === 'column_name_mismatch' && issue.field === 'プラットフォーム'), { field: 'importIssues', actual: getImportIssuesFromDashboard() });
       }
     } else {
       assertEqual(`${testCase.type} xlsx template Sheet1 name`, template.sheets[0]?.name, '入力データ', { field: 'sheetName' });
@@ -1024,12 +1038,19 @@ async function validateImportTemplates() {
         const normalizedRows = callFunction('normalizeFareMatrix', [parsed.rawRows, 'ヤマト', '宅急便']);
         assertTruthy(`${testCase.type} xlsx template parses as real matrix`, matrixView?.rows?.length > 0, { field: 'matrixView' });
         assertTruthy(`${testCase.type} xlsx template includes three carrier matrices`, ['ヤマト', '佐川', '日本郵便'].every((carrier) => normalizedRows.some((fare) => fare.carrier === carrier)), { field: 'normalizedFareRows', actual: [...new Set(normalizedRows.map((fare) => fare.carrier))] });
+        assertJapanPostTemplateRows(`${testCase.type} xlsx`, normalizedRows);
         resetImportIssues();
         const issues = callFunction('recordFareImportIssues', [parsed.rawRows, format, matrixView, normalizedRows, template.fileName]);
         assertEqual(`${testCase.type} xlsx template upload warningCount is 0`, issues.length, 0, { field: 'warningCount', actual: issues });
         assertEqual(`${testCase.type} xlsx template upload unresolvedIssues is 0`, getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
       } else {
         testCase.headers.forEach((header) => assertIncludes(`${testCase.type} xlsx parsed header ${header}`, parsedHeaders, vm.runInContext(`normalizeHeader(${JSON.stringify(header)})`, ctx), { field: 'headers' }));
+        if (testCase.type === 'orders') {
+          const result = callFunction('importOrderCsvRows', [parsed.rows]);
+          resetImportIssues();
+          callFunction('recordOrderImportIssues', [result, template.fileName]);
+          assertTruthy(`${testCase.type} xlsx template has no false platform warning for プラットフォーム`, !getImportIssuesFromDashboard().some((issue) => issue.type === 'column_name_mismatch' && issue.field === 'プラットフォーム'), { field: 'importIssues', actual: getImportIssuesFromDashboard() });
+        }
       }
     }
   }
@@ -1044,6 +1065,8 @@ async function validateImportTemplates() {
   const fareExplanation = fareXlsx.sheets[1].rows.flat().join(' ');
   assertTruthy('fares xlsx template explains vertical format', fareExplanation.includes('縦持ち形式'), { field: '入力説明' });
   assertTruthy('fares xlsx template explains matrix format', fareExplanation.includes('マトリクス形式'), { field: '入力説明' });
+  assertTruthy('fares xlsx template explains Japan Post 25kg limit', fareExplanation.includes('日本郵便 ゆうパックは全サイズ共通で重量上限25kgです。'), { field: '入力説明' });
+  assertTruthy('fares xlsx template explains Japan Post size priority', fareExplanation.includes('サイズ判定は三辺合計(cm)を優先します。'), { field: '入力説明' });
 }
 
 
@@ -1166,6 +1189,11 @@ function validateP0Regression() {
   ] });
   const fareOptions = callFunction('getFareOptions', [70, '東京', 1000]).map((fare) => [fare.service, fare.size, fare.fare]);
   assertEqual('P0-2 fare options upsize/filter/sort', JSON.stringify(fareOptions), JSON.stringify([['80', '80', '900']]), { field: 'fareOptions', expected: [['80', '80', '900']], actual: fareOptions });
+  setData('shipnaviDashboardFareTables', { matrixView: null, normalizedFareRows: [
+    { carrier: '日本郵便', service: 'ゆうパック', size: '170', zone: '東京', fare: '3000', weightLimit: '25000' },
+  ] });
+  const japanPost170Options = callFunction('getFareOptions', [165, '東京', 25000]).map((fare) => [fare.carrier, fare.service, fare.size, fare.fare]);
+  assertEqual('P0-2 Japan Post 170 size remains selectable', JSON.stringify(japanPost170Options), JSON.stringify([['日本郵便', 'ゆうパック', '170', '3000']]), { field: 'fareOptions', expected: [['日本郵便', 'ゆうパック', '170', '3000']], actual: japanPost170Options });
 
   setData('shipnaviDashboardProducts', [
     { sku: 'A', bundleable: true, weight: '100', length: '10', width: '10', height: '10', size: '60' },
