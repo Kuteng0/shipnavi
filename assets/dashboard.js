@@ -3170,32 +3170,49 @@ function renderShipmentActionButtons(row) {
   return actions.map(([status, label]) => `<button class="small-button" type="button" data-set-shipment-status="${status}" data-shipment-id="${escapeHtml(row.shipmentGroupId)}">${label}</button>`).join('');
 }
 
+function renderCompactShipmentQueueRow(row) {
+  const packageText = row.estimatedSize ? `${row.estimatedSize}サイズ` : row.status;
+  const weightText = `${toNumber(row.totalWeight).toLocaleString('ja-JP')}g`;
+  const fareText = row.estimatedFare === '' ? row.status : formatYen(row.estimatedFare);
+  return `
+    <tr>
+      <td class="id-cell">
+        <strong>${escapeHtml(row.shipmentGroupId)}</strong>
+        <span class="badge ${getShipmentStatusClass(row.shipmentStatus)}">${escapeHtml(getShipmentStatusLabel(row.shipmentStatus))}</span>
+      </td>
+      <td class="result-info-cell">
+        <strong>${escapeHtml(row.orderNos)}</strong>
+        <span>${escapeHtml(row.customer)}</span>
+        <span>${escapeHtml(row.sourcePlatform || '-')}</span>
+      </td>
+      <td class="wrap-cell address-cell">
+        <strong>${escapeHtml(row.postal || '郵便番号未設定')}</strong>
+        <span>${escapeHtml(row.address)}</span>
+      </td>
+      <td class="wrap-cell sku-cell">
+        <strong>${escapeHtml(row.items)}</strong>
+        <span>${escapeHtml(packageText)} / ${escapeHtml(weightText)}</span>
+      </td>
+      <td class="result-info-cell">
+        <strong>${escapeHtml(row.recommendedCarrier || row.status)}</strong>
+        <span>${escapeHtml(row.recommendedService || '-')}</span>
+        <span class="money-inline">${escapeHtml(fareText)}</span>
+      </td>
+      <td>
+        <div class="queue-actions shipment-status-actions">${renderShipmentActionButtons(row)}</div>
+      </td>
+    </tr>
+  `;
+}
+
 function renderShipmentQueue() {
   const target = document.querySelector('#shipment-queue-view');
   if (!target) return;
   const shipments = getShipmentGroups();
   const exportableCount = shipments.filter((row) => !['error', 'on_hold'].includes(row.shipmentStatus)).length;
   const rows = shipments.length
-    ? shipments.map((row) => `
-      <tr>
-        <td>${escapeHtml(row.shipmentGroupId)}</td>
-        <td><span class="badge ${getShipmentStatusClass(row.shipmentStatus)}">${escapeHtml(getShipmentStatusLabel(row.shipmentStatus))}</span></td>
-        <td>${renderShipmentStatusSelect(row)}</td>
-        <td>${escapeHtml(row.orderNos)}</td>
-        <td>${escapeHtml(row.customer)}</td>
-        <td>${escapeHtml(row.sourcePlatform || '-')}</td>
-        <td>${escapeHtml(row.postal || '郵便番号未設定')}</td>
-        <td class="wrap-cell address-cell">${escapeHtml(row.address)}</td>
-        <td class="wrap-cell sku-cell">${escapeHtml(row.items)}</td>
-        <td>${row.estimatedSize ? `${escapeHtml(row.estimatedSize)}サイズ` : escapeHtml(row.status)}</td>
-        <td>${toNumber(row.totalWeight).toLocaleString('ja-JP')}g</td>
-        <td>${escapeHtml(row.recommendedCarrier || row.status)}</td>
-        <td>${escapeHtml(row.recommendedService || '-')}</td>
-        <td class="money-cell">${row.estimatedFare === '' ? escapeHtml(row.status) : formatYen(row.estimatedFare)}</td>
-        <td><div class="row-actions queue-actions">${renderShipmentActionButtons(row)}</div></td>
-      </tr>
-    `).join('')
-    : '<tr><td colspan="15">出荷候補がありません。注文データを取り込んでください。</td></tr>';
+    ? shipments.map(renderCompactShipmentQueueRow).join('')
+    : '<tr><td colspan="6">出荷候補がありません。注文データを取り込んでください。</td></tr>';
   target.innerHTML = `
     <section class="stat-grid full-width">
       <article class="stat-card"><p>出荷候補</p><strong>${shipments.length}</strong></article>
@@ -3208,7 +3225,7 @@ function renderShipmentQueue() {
         <div><h2>出荷キュー</h2><p class="help-text">エラーと保留は出荷CSV出力から初期除外します。</p></div>
         <button class="button secondary" type="button" id="export-shipment-csv">出荷CSV出力</button>
       </div>
-      <div class="responsive-table queue-table shipment-queue-table"><table><thead><tr><th>出荷グループ</th><th>状態</th><th>状態変更</th><th>対象注文番号</th><th>顧客名</th><th>取込元プラットフォーム</th><th>郵便番号</th><th>配送先住所</th><th>SKU明細</th><th>推定サイズ</th><th>合計重量</th><th>推奨配送会社</th><th>推奨サービス</th><th>推定運賃</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="responsive-table queue-table shipment-queue-table"><table><thead><tr><th>出荷グループ</th><th>注文 / 顧客</th><th>配送先</th><th>荷物</th><th>推奨</th><th>状態変更</th></tr></thead><tbody>${rows}</tbody></table></div>
     </section>
   `;
   document.querySelector('#export-shipment-csv')?.addEventListener('click', () => {
