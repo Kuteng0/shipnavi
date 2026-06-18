@@ -1181,6 +1181,14 @@ td {
   background: var(--white);
 }
 
+.fare-preview-grid td {
+  cursor: pointer;
+}
+
+.fare-preview-grid td:hover {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
 .fare-preview-grid thead th,
 .fare-preview-grid .preview-row-number {
   position: sticky;
@@ -1205,6 +1213,33 @@ td {
   width: 3rem;
 }
 
+.fare-preview-grid .is-zone-range {
+  background: #e8f2ff;
+}
+
+.fare-preview-grid .is-prefecture-range {
+  background: #e8f8f0;
+}
+
+.fare-preview-grid .is-size-range,
+.fare-preview-grid .is-weight-range {
+  background: #fff7df;
+}
+
+.fare-preview-grid .is-fare-range {
+  background: #fff2c2;
+}
+
+.fare-preview-grid .is-carrier-cell,
+.fare-preview-grid .is-service-cell {
+  box-shadow: inset 0 0 0 2px #0b63ce;
+}
+
+.fare-preview-grid .is-active-selection {
+  outline: 3px solid #0b63ce;
+  outline-offset: -3px;
+}
+
 .mapping-preview-result {
   display: grid;
   gap: 8px;
@@ -1212,6 +1247,64 @@ td {
 
 .mapping-preview-result p {
   margin-bottom: 0;
+}
+
+.mapping-result-confirmation {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #bce8cf;
+  border-radius: 8px;
+  background: #f1fbf6;
+}
+
+.mapping-result-confirmation h4 {
+  margin: 0;
+}
+
+.mapping-guidance,
+.mapping-result-summary {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.mapping-guidance {
+  color: #7a3d00;
+  background: #fff8e8;
+  border-color: #f4d38a;
+}
+
+.mapping-guidance ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.mapping-result-summary {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.mapping-wizard-header .badge {
+  align-self: start;
+}
+
+.confidence-高 {
+  color: #087443;
+  background: #e8f8f0;
+}
+
+.confidence-中 {
+  color: #5f4500;
+  background: #fff2c2;
+}
+
+.confidence-低 {
+  color: #8a1f1f;
+  background: #ffe0e0;
 }
 
 .results-filter-toolbar {
