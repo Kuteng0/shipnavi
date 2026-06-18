@@ -27,7 +27,7 @@ const keys = {
 };
 
 const supportedCarriers = ['ヤマト', '佐川', '日本郵便'];
-const shippingSizes = [60, 80, 100, 120, 140, 160];
+const shippingSizes = [60, 80, 100, 120, 140, 160, 170];
 const shipmentStatusModel = ['imported', 'pending', 'ready', 'shipped', 'on_hold', 'error'];
 const shipmentStatusLabels = {
   imported: '取込済み',
@@ -638,6 +638,7 @@ function templateRowsFor(type) {
       ['120', '25', '2340', '1830', '1830', '1770', '1830', '1830', '1830', '1830', '1940', '2080', '2080', '2340', '2490'],
       ['140', '25', '2680', '2170', '2170', '2120', '2170', '2170', '2170', '2170', '2300', '2440', '2440', '2680', '2860'],
       ['160', '25', '3010', '2500', '2500', '2450', '2500', '2500', '2500', '2500', '2610', '2750', '2750', '3010', '3180'],
+      ['170', '25', '3330', '3070', '3070', '3000', '3070', '3070', '3070', '3070', '3750', '3890', '3890', '4350', '5030'],
     ]),
   ];
   if (type === 'products') return productRows;
@@ -677,6 +678,7 @@ function templateDescriptionRows(type) {
   return [
     ...common,
     ['マトリクス形式', '1行目に配送会社とサービス、着地行に地域、３辺合計(cm)と重量(kg)の行に見出しを入力します。'],
+    ['日本郵便 ゆうパック', '日本郵便 ゆうパックは全サイズ共通で重量上限25kgです。サイズ判定は三辺合計(cm)を優先します。'],
     ['縦持ち形式', '配送会社、サービス、配送サイズ、配送地域、送料、重量上限を縦持ちで入力する既存形式も利用できます。'],
     ['注意事項', '金額は数字、¥、円、カンマを含めて入力できます。重量上限はkgまたはgで入力してください。'],
   ];
@@ -1082,6 +1084,7 @@ const platformFieldMappings = {
       address: ['address', '配送先住所'],
       sku: ['sku', 'SKU'],
       quantity: ['quantity', '数量'],
+      sourcePlatform: ['プラットフォーム', 'platform', 'sourcePlatform', '取込元プラットフォーム'],
     },
   },
   '楽天': {
@@ -1279,6 +1282,7 @@ function normalizePlatformOrderRow(row, platform) {
   let sku = resolveField(row, mapping?.fieldCandidates?.sku || []);
   const productName = resolveField(row, mapping?.fieldCandidates?.productName || []);
   const rawQuantity = resolveField(row, mapping?.fieldCandidates?.quantity || []);
+  const sourcePlatform = resolveField(row, mapping?.fieldCandidates?.sourcePlatform || []);
   const numericQuantity = toNumber(rawQuantity);
   const warnings = [];
 
@@ -1301,7 +1305,7 @@ function normalizePlatformOrderRow(row, platform) {
     address,
     sku,
     quantity: String(Math.max(1, numericQuantity || 1)),
-    sourcePlatform: platform,
+    sourcePlatform: sourcePlatform || platform,
     warnings,
   };
 }
@@ -3226,6 +3230,10 @@ function renderCarriers(filter = '') {
         </tr>
       `).join('');
       const emptyZoneCells = matrix.zoneHeaders.map(() => '<th></th>').join('');
+      const hasJapanPostWeightNote = matrix.carrier === '日本郵便'
+        && normalize(matrix.service).includes('ゆうパック')
+        && matrix.rows.length
+        && matrix.rows.every((row) => toNumber(row.weight) === 25);
       const matrixRows = matrix.rows.map((row, rowIndex) => `
         <tr>
           <td><input class="matrix-cell-input" data-matrix-size="${tableIndex}-${rowIndex}" value="${escapeHtml(row.size)}" /></td>
@@ -3239,6 +3247,7 @@ function renderCarriers(filter = '') {
           <div class="matrix-editor">
             <div class="matrix-editor-header">
               <strong class="matrix-editor-title">${escapeHtml(matrixDisplayCarrier(matrix.carrier, matrix.carrierLabel))} / ${escapeHtml(matrix.service)}</strong>
+              ${hasJapanPostWeightNote ? '<span class="help-text">重量上限: 各サイズ25kg</span>' : ''}
               <label class="input-group compact-input">配送会社<input data-matrix-carrier="${tableIndex}" value="${escapeHtml(matrixDisplayCarrier(matrix.carrier, matrix.carrierLabel))}" /></label>
               <label class="input-group compact-input">サービス<input data-matrix-service="${tableIndex}" value="${escapeHtml(matrix.service)}" /></label>
               <div class="row-actions matrix-editor-actions">
@@ -3513,6 +3522,7 @@ function renderTemplates() {
       <p>注文CSV: 注文番号、顧客名、郵便番号、配送先住所、SKU、数量</p>
       <p>商品マスタ: SKU、商品名、配送サイズ、重量、長さ、幅、高さ、同梱可否</p>
       <p>運賃表: 配送会社、サービス、配送サイズ、配送地域、送料</p>
+      <p>日本郵便 ゆうパックは全サイズ共通で重量上限25kgです。サイズ判定は三辺合計(cm)を優先します。</p>
     </section>
   `;
 }
