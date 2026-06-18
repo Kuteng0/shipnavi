@@ -383,12 +383,16 @@ async function validateFareFixtures() {
   const normalXlsxFile = fixturePath('fares', 'fare-matrix-normal.xlsx');
   const xlsxStyleFile = fixturePath('fares', 'fare-matrix-xlsx-style.csv');
   const xlsxStyleXlsxFile = fixturePath('fares', 'fare-matrix-xlsx-style.xlsx');
+  const wizardLowConfidenceFile = fixturePath('fares', '04_fare_matrix_yamato_wizard_low_confidence.csv');
+  const wizardLowConfidenceXlsxFile = fixturePath('fares', '04_fare_matrix_yamato_wizard_low_confidence.xlsx');
   const edgeFile = fixturePath('fares', 'fare-matrix-edge-cases.csv');
   const edgeXlsxFile = fixturePath('fares', 'fare-matrix-edge-cases.xlsx');
   ensureFile(normalFile);
   ensureFile(normalXlsxFile, 'XLSX fixture');
   ensureFile(xlsxStyleFile);
   ensureFile(xlsxStyleXlsxFile, 'XLSX fixture');
+  ensureFile(wizardLowConfidenceFile);
+  ensureFile(wizardLowConfidenceXlsxFile, 'XLSX fixture');
   ensureFile(edgeFile);
   ensureFile(edgeXlsxFile, 'XLSX fixture');
 
@@ -560,6 +564,38 @@ async function validateFareFixtures() {
   assertEqual('valid manual mapping unresolvedIssues is 0', getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
   const invalidMappingValidation = callFunction('validateFareImportMapping', [manualMappingRows, { ...manualRule, zoneStartCol: 'Z', zoneEndCol: 'Z' }]);
   assertTruthy('invalid manual mapping shows Japanese guidance', !invalidMappingValidation.valid && invalidMappingValidation.guidance.some((message) => message.includes('ゾーン') || message.includes('運賃')), { field: 'guidance', actual: invalidMappingValidation.guidance });
+  const wizardXlsx = await readImportFixtureFile(wizardLowConfidenceXlsxFile);
+  assertEqual('low-confidence wizard XLSX has no readable sheet error', wizardXlsx.errors.includes('Excelファイルに読み込めるシートがありません。'), false, { fixture: path.relative(repoRoot, wizardLowConfidenceXlsxFile), field: 'errors', actual: wizardXlsx.errors });
+  assertTruthy('low-confidence wizard XLSX preserves sheet grid', wizardXlsx.rawRows?.length >= 19 && wizardXlsx.rawRows[2]?.[2] === 'ヤマト運輸' && wizardXlsx.rawRows[4]?.[3] === '北海道', { fixture: path.relative(repoRoot, wizardLowConfidenceXlsxFile), field: 'rawRows', actual: { rows: wizardXlsx.rawRows?.length, c3: wizardXlsx.rawRows?.[2]?.[2], d5: wizardXlsx.rawRows?.[4]?.[3] } });
+  const wizardDetection = callFunction('detectFareTableFormatDetails', [wizardXlsx.rawRows[0] || [], wizardXlsx.rawRows]);
+  assertEqual('low-confidence wizard XLSX stays below auto-import confidence', wizardDetection.confidence < 80, true, { field: 'confidence', actual: wizardDetection });
+  assertTruthy('low-confidence wizard XLSX opens Mapping Wizard state', callFunction('shouldOpenFareMappingWizard', [wizardDetection.format, null, []]), { field: 'mappingWizard' });
+  const wizardRule = {
+    name: 'ヤマト低信頼度XLSX',
+    carrierCell: 'C3',
+    serviceCell: 'E3',
+    zoneHeaderRow: 5,
+    zoneStartCol: 'D',
+    zoneEndCol: 'P',
+    prefectureStartRow: 6,
+    prefectureEndRow: 12,
+    sizeCol: 'B',
+    weightCol: 'C',
+    fareStartRow: 14,
+    fareEndRow: 19,
+  };
+  const wizardPreview = callFunction('previewFareImportMapping', [wizardXlsx.rawRows, wizardRule]);
+  assertTruthy('low-confidence wizard mapping creates matrixView', wizardPreview.matrixView?.rows?.length > 0, { field: 'matrixView' });
+  assertTruthy('low-confidence wizard mapping creates normalizedFareRows', wizardPreview.normalizedFareRows.length > 0, { field: 'normalizedFareRows.length', actual: wizardPreview.normalizedFareRows.length });
+  assertIncludes('low-confidence wizard mapping includes 北海道', wizardPreview.matrixView.zoneHeaders, '北海道', { field: 'matrixView.zoneHeaders' });
+  assertIncludes('low-confidence wizard mapping includes 関東', wizardPreview.matrixView.zoneHeaders, '関東', { field: 'matrixView.zoneHeaders' });
+  assertIncludes('low-confidence wizard mapping includes 沖縄', wizardPreview.matrixView.zoneHeaders, '沖縄', { field: 'matrixView.zoneHeaders' });
+  assertEqual('low-confidence wizard 80 / 5kg / 関東 fare', wizardPreview.normalizedFareRows.find((fare) => fare.zone === '関東' && fare.size === '80' && fare.weight === '5')?.fare, '480', { field: 'normalizedFareRows' });
+  assertEqual('low-confidence wizard 160 / 25kg / 沖縄 fare', wizardPreview.normalizedFareRows.find((fare) => fare.zone === '沖縄' && fare.size === '160' && fare.weight === '25')?.fare, '3780', { field: 'normalizedFareRows' });
+  resetImportIssues();
+  const wizardIssues = callFunction('recordFareImportIssues', [wizardXlsx.rawRows, 'matrix', wizardPreview.matrixView, wizardPreview.normalizedFareRows, path.basename(wizardLowConfidenceXlsxFile)]);
+  assertEqual('low-confidence wizard valid mapping warningCount is 0', wizardIssues.length, 0, { field: 'warningCount', actual: wizardIssues });
+  assertEqual('low-confidence wizard valid mapping unresolvedIssues is 0', getOpenImportIssuesFromDashboard().length, 0, { field: 'unresolvedIssues' });
   setData('shipnaviFareImportMappingRules', []);
   const savedManualRule = callFunction('saveFareImportMappingRule', [manualRule]);
   const savedRules = callFunction('getFareImportMappingRules', []);
