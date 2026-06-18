@@ -1980,6 +1980,76 @@ function normalizeFareImportMappingRule(rule = {}) {
   };
 }
 
+function cellPositionName(rowIndex, colIndex) {
+  return rowIndex >= 0 && colIndex >= 0 ? `${columnName(colIndex)}${rowIndex + 1}` : '';
+}
+
+function findFareMappingCandidateCell(rowArrays, matcher) {
+  for (let rowIndex = 0; rowIndex < rowArrays.length; rowIndex += 1) {
+    const row = rowArrays[rowIndex] || [];
+    for (let colIndex = 0; colIndex < row.length; colIndex += 1) {
+      if (matcher(compactText(row[colIndex]), rowIndex, colIndex)) return { rowIndex, colIndex, value: compactText(row[colIndex]) };
+    }
+  }
+  return { rowIndex: -1, colIndex: -1, value: '' };
+}
+
+function isKnownFareMappingZone(value) {
+  return japaneseMatrixZones.includes(compactText(value));
+}
+
+function detectFareMappingCandidates(rows) {
+  const rowArrays = rowArraysFromRows(rows).map((row) => row.map(compactText));
+  const carrier = findFareMappingCandidateCell(rowArrays, (cell) => supportedCarriers.some((candidate) => cell.includes(candidate)));
+  const service = findFareMappingCandidateCell(rowArrays, (cell, rowIndex) => (
+    /宅急便|飛脚宅配便|ゆうパック/.test(cell)
+    && (carrier.rowIndex < 0 || Math.abs(rowIndex - carrier.rowIndex) <= 3)
+  ));
+  const zoneRows = rowArrays.map((row, rowIndex) => {
+    const zones = row
+      .map((cell, colIndex) => ({ cell, colIndex }))
+      .filter(({ cell }) => isKnownFareMappingZone(cell));
+    return { rowIndex, zones, count: zones.length };
+  }).filter((row) => row.count > 0);
+  const bestZoneRow = zoneRows.sort((a, b) => b.count - a.count || a.rowIndex - b.rowIndex)[0] || { rowIndex: -1, zones: [] };
+  const zoneStartIndex = bestZoneRow.zones[0]?.colIndex ?? -1;
+  const zoneEndIndex = bestZoneRow.zones.at(-1)?.colIndex ?? -1;
+  const headerRowIndex = rowArrays.findIndex((row) => row.some(isMatrixSizeHeader) && row.some(isMatrixWeightHeader));
+  const headerRow = rowArrays[headerRowIndex] || [];
+  const sizeIndex = headerRow.findIndex(isMatrixSizeHeader);
+  const weightIndex = headerRow.findIndex(isMatrixWeightHeader);
+  let fareStartIndex = -1;
+  let fareEndIndex = -1;
+  if (headerRowIndex >= 0 && sizeIndex >= 0 && weightIndex >= 0) {
+    for (let rowIndex = headerRowIndex + 1; rowIndex < rowArrays.length; rowIndex += 1) {
+      const row = rowArrays[rowIndex] || [];
+      const hasTier = toNumber(row[sizeIndex]) > 0 && toNumber(row[weightIndex]) > 0;
+      const hasFare = zoneStartIndex >= 0 && zoneEndIndex >= zoneStartIndex
+        && row.slice(zoneStartIndex, zoneEndIndex + 1).some((cell) => toNumber(cell) > 0);
+      if (hasTier && hasFare) {
+        if (fareStartIndex < 0) fareStartIndex = rowIndex;
+        fareEndIndex = rowIndex;
+      } else if (fareStartIndex >= 0) {
+        break;
+      }
+    }
+  }
+  return {
+    carrier,
+    service,
+    zoneHeaderRowIndex: bestZoneRow.rowIndex,
+    zoneStartIndex,
+    zoneEndIndex,
+    prefectureStartIndex: bestZoneRow.rowIndex >= 0 ? bestZoneRow.rowIndex + 1 : -1,
+    prefectureEndIndex: headerRowIndex > bestZoneRow.rowIndex ? headerRowIndex - 1 : -1,
+    headerRowIndex,
+    sizeIndex,
+    weightIndex,
+    fareStartIndex,
+    fareEndIndex,
+  };
+}
+
 function createMatrixViewFromMapping(rows, mapping = {}) {
   const rowArrays = rowArraysFromRows(rows).map((row) => Array.from({ length: row.length }, (_, index) => compactText(row[index])));
   const rule = normalizeFareImportMappingRule(mapping);
@@ -2043,6 +2113,8 @@ function previewFareImportMapping(rows, mapping = {}) {
     service: matrixView?.service || '',
     zones: matrixView?.zoneHeaders || [],
     zoneGroups: matrixView?.zoneGroups || {},
+    prefectureGroupCount: Object.values(matrixView?.zoneGroups || {}).filter((prefectures) => prefectures.length).length,
+    prefectureCount: Object.values(matrixView?.zoneGroups || {}).reduce((count, prefectures) => count + prefectures.length, 0),
     tiers: matrixView?.rows?.map((row) => ({ size: row.size, weight: row.weight })) || [],
     fareCellCount: normalizedFareRows.length,
     samples: normalizedFareRows.slice(0, 8),
@@ -2052,9 +2124,21 @@ function previewFareImportMapping(rows, mapping = {}) {
 function validateFareImportMapping(rows, mapping = {}, matrixView = null, normalizedFareRows = null) {
   const view = matrixView || createMatrixViewFromMapping(rows, mapping);
   const fareRows = normalizedFareRows || (view ? normalizeFareMatrix(view) : []);
+  const rule = normalizeFareImportMappingRule(mapping);
+  const zoneStartIndex = columnInputToIndex(rule.zoneStartCol);
+  const zoneEndIndex = columnInputToIndex(rule.zoneEndCol);
+  const prefectureStartIndex = rowInputToIndex(rule.prefectureStartRow);
+  const prefectureEndIndex = rowInputToIndex(rule.prefectureEndRow);
+  const fareStartIndex = rowInputToIndex(rule.fareStartRow);
+  const fareEndIndex = rowInputToIndex(rule.fareEndRow);
+  const prefectureGroupCount = Object.values(view?.zoneGroups || {}).filter((prefectures) => prefectures.length).length;
   const guidance = [];
+  if (zoneStartIndex >= 0 && zoneEndIndex >= 0 && zoneStartIndex > zoneEndIndex) guidance.push('地域の開始列と終了列を確認してください。');
+  if (prefectureStartIndex >= 0 && prefectureEndIndex >= 0 && prefectureStartIndex > prefectureEndIndex) guidance.push('都道府県の開始行と終了行を確認してください。');
+  if (fareStartIndex >= 0 && fareEndIndex >= 0 && fareStartIndex > fareEndIndex) guidance.push('運賃の開始行と終了行を確認してください。');
   if (!view?.carrier) guidance.push('配送会社セルまたは配送会社名を指定してください。');
   if (!view?.zoneHeaders?.length) guidance.push('地域ヘッダー行を確認してください。');
+  if (view?.zoneHeaders?.length && !prefectureGroupCount) guidance.push('都道府県グループを確認してください。');
   if (!view?.rows?.some((row) => normalize(row.size))) guidance.push('サイズ列または運賃開始/終了行を確認してください。');
   if (!view?.rows?.some((row) => normalize(row.weight))) guidance.push('重量列または運賃開始/終了行を確認してください。');
   if (!view?.rows?.some((row) => Object.values(row.fares || {}).some((fare) => toNumber(fare) > 0))) guidance.push('運賃範囲を確認してください。');
@@ -2614,33 +2698,24 @@ function fareMappingWizardContainer() {
 }
 
 function defaultFareMappingRule(rows, carrierName = '', serviceName = '') {
-  const rowArrays = rowArraysFromRows(rows);
-  const zoneRowIndex = rowArrays.findIndex((row) => row.some((cell) => normalizeHeader(cell) === '着地'));
-  const headerRowIndex = rowArrays.findIndex((row) => row.some(isMatrixSizeHeader) && row.some(isMatrixWeightHeader));
-  const headerRow = rowArrays[headerRowIndex] || [];
-  const sizeIndex = headerRow.findIndex(isMatrixSizeHeader);
-  const weightIndex = headerRow.findIndex(isMatrixWeightHeader);
-  const zoneLabelIndex = zoneRowIndex >= 0 ? rowArrays[zoneRowIndex].findIndex((cell) => normalizeHeader(cell) === '着地') : -1;
-  const zoneStartIndex = zoneRowIndex >= 0
-    ? rowArrays[zoneRowIndex].findIndex((cell, index) => index > zoneLabelIndex && compactText(cell))
-    : Math.max(sizeIndex, weightIndex) + 1;
-  const zoneEndIndex = zoneRowIndex >= 0
-    ? rowArrays[zoneRowIndex].reduce((last, cell, index) => (index >= zoneStartIndex && compactText(cell) ? index : last), zoneStartIndex)
-    : Math.max(zoneStartIndex, rowArrays[0]?.length - 1 || zoneStartIndex);
+  const candidates = detectFareMappingCandidates(rows);
+  const carrier = normalizeCarrier(carrierName || candidates.carrier.value);
+  const service = normalize(serviceName || candidates.service.value || (carrier === 'ヤマト' ? '宅急便' : ''));
   return normalizeFareImportMappingRule({
-    name: carrierName ? `${carrierName} ${serviceName}`.trim() : '',
-    carrier: carrierName,
-    service: serviceName,
-    carrierCell: 'A1',
-    zoneHeaderRow: zoneRowIndex >= 0 ? zoneRowIndex + 1 : 2,
-    zoneStartCol: columnName(Math.max(0, zoneStartIndex)),
-    zoneEndCol: columnName(Math.max(zoneStartIndex, zoneEndIndex)),
-    prefectureStartRow: zoneRowIndex >= 0 ? zoneRowIndex + 2 : 3,
-    prefectureEndRow: headerRowIndex > zoneRowIndex ? headerRowIndex : 9,
-    sizeCol: columnName(Math.max(0, sizeIndex)),
-    weightCol: columnName(Math.max(1, weightIndex)),
-    fareStartRow: headerRowIndex >= 0 ? headerRowIndex + 2 : 10,
-    fareEndRow: rowArrays.length,
+    name: carrier ? `${carrier} ${service}`.trim() : '',
+    carrier,
+    service,
+    carrierCell: cellPositionName(candidates.carrier.rowIndex, candidates.carrier.colIndex),
+    serviceCell: cellPositionName(candidates.service.rowIndex, candidates.service.colIndex),
+    zoneHeaderRow: candidates.zoneHeaderRowIndex >= 0 ? candidates.zoneHeaderRowIndex + 1 : 2,
+    zoneStartCol: columnName(Math.max(0, candidates.zoneStartIndex)),
+    zoneEndCol: columnName(Math.max(candidates.zoneStartIndex, candidates.zoneEndIndex, 0)),
+    prefectureStartRow: candidates.prefectureStartIndex >= 0 ? candidates.prefectureStartIndex + 1 : 3,
+    prefectureEndRow: candidates.prefectureEndIndex >= 0 ? candidates.prefectureEndIndex + 1 : 9,
+    sizeCol: columnName(Math.max(0, candidates.sizeIndex)),
+    weightCol: columnName(Math.max(1, candidates.weightIndex)),
+    fareStartRow: candidates.fareStartIndex >= 0 ? candidates.fareStartIndex + 1 : 10,
+    fareEndRow: candidates.fareEndIndex >= 0 ? candidates.fareEndIndex + 1 : rowArraysFromRows(rows).length,
   });
 }
 
@@ -2742,8 +2817,10 @@ function renderFareMappingPreview(preview) {
         <span>配送会社: <strong>${escapeHtml(preview.carrier)}</strong></span>
         <span>サービス: <strong>${escapeHtml(preview.service)}</strong></span>
         <span>ゾーン数: <strong>${preview.zones.length}</strong></span>
-        <span>都道府県グループ数: <strong>${Object.values(preview.zoneGroups).filter((prefectures) => prefectures.length).length}</strong></span>
+        <span>都道府県グループ数: <strong>${preview.prefectureGroupCount}</strong></span>
+        <span>都道府県数: <strong>${preview.prefectureCount}</strong></span>
         <span>運賃行数: <strong>${preview.normalizedFareRows.length}</strong></span>
+        <span>サンプル運賃: <strong>${displaySamples.length}</strong></span>
       </div>
       <div class="responsive-table">
         <table>
@@ -2778,7 +2855,8 @@ function renderFareMappingResultConfirmation(preview) {
         <span>配送会社: <strong>${escapeHtml(preview.carrier)}</strong></span>
         <span>サービス: <strong>${escapeHtml(preview.service)}</strong></span>
         <span>ゾーン数: <strong>${preview.zones.length}</strong></span>
-        <span>都道府県グループ数: <strong>${Object.values(preview.zoneGroups).filter((prefectures) => prefectures.length).length}</strong></span>
+        <span>都道府県グループ数: <strong>${preview.prefectureGroupCount}</strong></span>
+        <span>都道府県数: <strong>${preview.prefectureCount}</strong></span>
         <span>運賃行数: <strong>${preview.normalizedFareRows.length}</strong></span>
       </div>
       ${samples.length ? `<p class="help-text">サンプル運賃: ${samples.map((fare) => `${escapeHtml(fare.size)} ${escapeHtml(fare.zone)} ${escapeHtml(fare.fare)}円`).join(' / ')}</p>` : '<p class="help-text">指定サンプル運賃はこの表には含まれていません。</p>'}
