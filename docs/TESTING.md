@@ -105,6 +105,11 @@ Confirm:
 ### Generated template checks
 
 - CSV and Excel templates are generated from current field definitions.
+- Carrier fare templates are generated from the built-in carrier template registry.
+- The registry includes ヤマト運輸 / 宅急便, 佐川急便 / 飛脚宅配便, and 日本郵便 / ゆうパック.
+- Yamato sizes and weight limits remain 60=2kg, 80=5kg, 100=10kg, 120=15kg, 140=20kg, 160=25kg.
+- Japan Post / Yu-Pack includes size 170 and all listed sizes use 25kg as the weight limit.
+- Built-in templates are treated as references; uploaded customer contract fare tables remain the source of truth.
 - Template downloads cover 商品マスタ, 送料マトリクス, 配送会社, 注文データ, 楽天, Yahoo, Amazon, Shopify, BASE, STORES, and メルカリShops.
 - Templates include required columns, optional columns, sample rows, notes, Excel instruction sheet, and Excel data entry sheet.
 - Downloaded CSV and Excel templates can be uploaded back into the importer for validation.
